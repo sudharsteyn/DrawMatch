@@ -397,7 +397,10 @@ function App() {
     return (
       <div className="app-container" style={{ justifyContent: 'center', alignItems: 'center' }}>
         <div className="glass-panel" style={{ padding: '40px', textAlign: 'center', minWidth: '350px' }}>
-          <h1 style={{ fontSize: '3rem', marginBottom: '20px' }}>DrawMatch</h1>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '20px' }}>
+             <img src="/logo.png" alt="DrawMatch Logo" style={{ width: '80px', height: '80px', borderRadius: '18px', marginBottom: '15px', boxShadow: '0 8px 25px rgba(0,0,0,0.3)' }} />
+             <h1 style={{ fontSize: '3rem', margin: 0 }}>DrawMatch</h1>
+          </div>
           <p style={{ marginBottom: '30px', color: 'var(--text-secondary)' }}>Can you copy the masterpiece?</p>
           
           <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
@@ -449,9 +452,12 @@ function App() {
            </div>
         ) : (
            <>
-             <div>
-                <h1>DrawMatch</h1>
-                <p>Room: {roomId}</p>
+             <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                <img src="/logo.png" alt="DrawMatch Logo" style={{ width: '45px', height: '45px', borderRadius: '10px' }} />
+                <div>
+                  <h1 style={{ margin: 0 }}>DrawMatch</h1>
+                  <p style={{ margin: 0, opacity: 0.8 }}>Room: {roomId}</p>
+                </div>
              </div>
              <div style={{ fontSize: '2rem', fontWeight: 'bold', color: timeLeft <= 10 ? 'var(--danger)' : 'white' }}>
                 {endTime ? formatTime(timeLeft) : 'Waiting...'}
