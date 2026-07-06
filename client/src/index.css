@@ -1,0 +1,222 @@
+:root {
+  --bg-color: #0f172a;
+  --panel-bg: rgba(30, 41, 59, 0.7);
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --border-color: rgba(255, 255, 255, 0.1);
+  --success: #10b981;
+  --danger: #ef4444;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background-color: var(--bg-color);
+  color: var(--text-primary);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+  background-image: 
+    radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), 
+    radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%), 
+    radial-gradient(at 100% 0%, hsla(339,49%,30%,1) 0, transparent 50%);
+  background-attachment: fixed;
+}
+
+.glass-panel {
+  background: var(--panel-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.3);
+}
+
+.btn {
+  background: var(--accent);
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 1rem;
+}
+
+.btn:hover {
+  background: var(--accent-hover);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+}
+
+.btn:active {
+  transform: translateY(0);
+}
+
+/* App Layout */
+.app-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  padding: 20px;
+}
+
+.header {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.header h1 {
+  font-size: 2.5rem;
+  font-weight: 800;
+  background: linear-gradient(to right, #60a5fa, #c084fc);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  margin-bottom: 5px;
+}
+
+.game-area {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  flex: 1;
+  gap: 30px;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.canvas-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 15px;
+}
+
+.canvas-wrapper {
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  background: white; /* Canvas background is white by default to draw on */
+}
+
+.reference-container {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.reference-image {
+  width: 400px;
+  height: 300px;
+  object-fit: cover;
+  border: 8px solid #d4af37; /* Gold frame style */
+  box-shadow: 
+    0 10px 40px rgba(0,0,0,0.6),
+    inset 0 0 20px rgba(0,0,0,0.5);
+}
+
+.grid-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  background-image: 
+    linear-gradient(rgba(0,0,0,0.2) 1px, transparent 1px), 
+    linear-gradient(90deg, rgba(0,0,0,0.2) 1px, transparent 1px);
+  background-size: 50px 50px;
+}
+
+.accuracy-bar-container {
+  width: 100%;
+  height: 20px;
+  background: rgba(0,0,0,0.3);
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+}
+
+.accuracy-bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--danger), var(--success));
+  width: 0%;
+  transition: width 0.3s ease;
+}
+
+.toolbar {
+  display: flex;
+  gap: 15px;
+  padding: 10px 20px;
+  border-radius: 30px;
+  margin-top: 10px;
+}
+
+.color-picker {
+  display: flex;
+  gap: 8px;
+}
+
+.color-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 2px solid white;
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+
+.color-btn:hover, .color-btn.active {
+  transform: scale(1.2);
+  box-shadow: 0 0 10px rgba(255,255,255,0.5);
+}
+
+.brush-sizes {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: 20px;
+  border-left: 1px solid var(--border-color);
+  padding-left: 20px;
+}
+
+.size-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: background 0.2s;
+}
+
+.size-btn:hover, .size-btn.active {
+  background: rgba(255,255,255,0.1);
+}
+
+.size-dot {
+  background: white;
+  border-radius: 50%;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
