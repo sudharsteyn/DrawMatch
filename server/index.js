@@ -99,6 +99,7 @@ io.on('connection', (socket) => {
         setTimeout(() => {
             if (rooms[roomId]) {
                 io.to(roomId).emit('gameOver', { scores: rooms[roomId].scores });
+                rooms[roomId].gameStarted = false; // Prevent 'opponentLeft' forfeit logic after the game naturally ends
             }
         }, 180000);
     }
