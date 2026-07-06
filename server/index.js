@@ -155,8 +155,14 @@ io.on('connection', (socket) => {
       if (index !== -1) {
         room.players.splice(index, 1);
         io.to(roomId).emit('roomUpdate', { players: room.players });
+        
         if (room.players.length === 0) {
             delete rooms[roomId]; 
+        } else {
+            // If the game was already started, let the remaining player know their opponent left
+            if (room.gameStarted) {
+                io.to(roomId).emit('opponentLeft');
+            }
         }
       }
     }

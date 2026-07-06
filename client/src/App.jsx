@@ -179,6 +179,7 @@ function App() {
   const [endTime, setEndTime] = useState(null);
   const [myDiffUrl, setMyDiffUrl] = useState(null);
   const [oppDiffUrl, setOppDiffUrl] = useState(null);
+  const [opponentLeft, setOpponentLeft] = useState(false);
   
   const referenceImgRef = useRef(null);
   const referenceCanvasRef = useRef(null); 
@@ -271,6 +272,22 @@ function App() {
 
     newSocket.on('scoreUpdate', ({ score }) => {
         setOpponentScore(score);
+    });
+
+    newSocket.on('opponentLeft', () => {
+        setGameStatus('finished');
+        setOpponentLeft(true);
+        setOpponentScore(0);
+        setTimeLeft(0);
+        setEndTime(null);
+        
+        // Generate diff just for the local player since opponent left
+        setTimeout(() => {
+            if (referenceCanvasRef.current && myCanvasRef.current) {
+                const myDiff = generateDiffOverlay(myCanvasRef.current.getCanvas(), referenceCanvasRef.current);
+                if (myDiff) setMyDiffUrl(myDiff);
+            }
+        }, 100);
     });
 
     return () => newSocket.close();
@@ -452,7 +469,7 @@ function App() {
       <div className="header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         {gameStatus === 'finished' ? (
            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', animation: 'fadeIn 0.5s ease' }}>
-              <h2 style={{ fontSize: '2.5rem', color: '#cbd5e1', letterSpacing: '10px', fontWeight: '300', margin: '20px 0 10px 0', textTransform: 'uppercase' }}>Time's Up</h2>
+              <h2 style={{ fontSize: '2.5rem', color: '#cbd5e1', letterSpacing: '10px', fontWeight: '300', margin: '20px 0 10px 0', textTransform: 'uppercase' }}>{opponentLeft ? 'Opponent Forfeited' : "Time's Up"}</h2>
               <button className="btn" onClick={() => window.location.reload()} style={{ padding: '10px 40px', fontSize: '1.2rem', borderRadius: '30px', background: 'var(--success)' }}>Play Again</button>
            </div>
         ) : (
@@ -493,7 +510,7 @@ function App() {
              <div style={{ position: 'relative', width: '100%', textAlign: 'left', marginBottom: '15px', animation: 'fadeIn 0.8s ease' }}>
                  <h2 style={{ fontSize: '4.5rem', margin: 0, fontWeight: '400', color: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     {myScore}
-                    {myScore > opponentScore && (
+                    {(myScore > opponentScore || opponentLeft) && (
                         <div style={{ color: '#ef4444', border: '4px solid #ef4444', borderRadius: '12px', padding: '5px 15px', fontSize: '2rem', fontWeight: '900', letterSpacing: '3px', transform: 'rotate(-8deg)', boxShadow: '0 4px 20px rgba(239, 68, 68, 0.3)', background: 'rgba(15,23,42,0.8)' }}>
                             WINNER!
                         </div>
