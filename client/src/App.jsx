@@ -190,8 +190,9 @@ function App() {
   const [colors, setColors] = useState(['#000000', '#FFFFFF']);
 
   useEffect(() => {
-    // Connect to local server
-    const newSocket = io('http://localhost:3001');
+    // Connect to local server during development, or deployed server in production
+    const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+    const newSocket = io(backendUrl);
     setSocket(newSocket);
     
     newSocket.on('connect', () => {
