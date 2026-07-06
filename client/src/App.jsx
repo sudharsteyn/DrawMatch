@@ -1,63 +1,95 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import { io } from 'socket.io-client';
-import { calculateSimilarity, calculateBaseline } from './utils/imageCompare';
+import { calculateSimilarity, calculateBaseline, generateDiffOverlay } from './utils/imageCompare';
 import { extractColorsFromCanvas } from './utils/extractColors';
 
-const Canvas = ({ isPlayer, color, brushSize, socket, roomId, onScoreUpdate, referenceCanvasRef, externalStrokes, initialStrokes, showGrid, currentScore, baselineScore }) => {
+const Canvas = forwardRef(({ isPlayer, color, brushSize, socket, roomId, onScoreUpdate, referenceCanvasRef, showGrid, baselineScore }, ref) => {
   const canvasRef = useRef(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const lastPos = useRef(null);
+  const currentStrokeId = useRef(null);
+  const strokesHistory = useRef([]);
 
-  // Initialize canvas
-  useEffect(() => {
+  const redrawCanvas = (strokes) => {
     const canvas = canvasRef.current;
+    if (!canvas) return;
     const ctx = canvas.getContext('2d');
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-  }, []);
-
-  // Replay initial strokes if provided (for late joiners)
-  useEffect(() => {
-    if (!isPlayer && initialStrokes && initialStrokes.length > 0) {
-      const canvas = canvasRef.current;
-      const ctx = canvas.getContext('2d');
-      // Briefly wait to ensure canvas is ready
-      setTimeout(() => {
-        initialStrokes.forEach(stroke => {
-          ctx.beginPath();
-          ctx.moveTo(stroke.startX, stroke.startY);
-          ctx.lineTo(stroke.endX, stroke.endY);
-          ctx.strokeStyle = stroke.color;
-          ctx.lineWidth = stroke.size;
-          ctx.lineCap = 'round';
-          ctx.lineJoin = 'round';
-          ctx.stroke();
-        });
-      }, 50);
-    }
-  }, [initialStrokes, isPlayer]);
-
-  // Handle incoming individual strokes from opponent
-  useEffect(() => {
-    if (!isPlayer && externalStrokes) {
-      const canvas = canvasRef.current;
-      const ctx = canvas.getContext('2d');
+    strokes.forEach(stroke => {
       ctx.beginPath();
-      ctx.moveTo(externalStrokes.startX, externalStrokes.startY);
-      ctx.lineTo(externalStrokes.endX, externalStrokes.endY);
-      ctx.strokeStyle = externalStrokes.color;
-      ctx.lineWidth = externalStrokes.size;
+      ctx.moveTo(stroke.startX, stroke.startY);
+      ctx.lineTo(stroke.endX, stroke.endY);
+      ctx.strokeStyle = stroke.color;
+      ctx.lineWidth = stroke.size;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       ctx.stroke();
+    });
+  };
+
+  useImperativeHandle(ref, () => ({
+    getCanvas: () => canvasRef.current,
+    undo: () => {
+       if (strokesHistory.current.length === 0) return;
+       const lastStrokeId = strokesHistory.current[strokesHistory.current.length - 1].strokeId;
+       strokesHistory.current = strokesHistory.current.filter(s => s.strokeId !== lastStrokeId);
+       redrawCanvas(strokesHistory.current);
+       if (isPlayer && onScoreUpdate && referenceCanvasRef.current) {
+           const newScore = calculateSimilarity(canvasRef.current, referenceCanvasRef.current, baselineScore);
+           onScoreUpdate(newScore);
+           if (socket && roomId) socket.emit('undoStroke', { roomId });
+       }
+    },
+    clear: () => {
+       strokesHistory.current = [];
+       redrawCanvas([]);
+       if (isPlayer && onScoreUpdate) {
+           onScoreUpdate(0);
+           if (socket && roomId) socket.emit('clearCanvas', { roomId });
+       }
+    },
+    addExternalStroke: (stroke) => {
+       strokesHistory.current.push(stroke);
+       const ctx = canvasRef.current.getContext('2d');
+       ctx.beginPath();
+       ctx.moveTo(stroke.startX, stroke.startY);
+       ctx.lineTo(stroke.endX, stroke.endY);
+       ctx.strokeStyle = stroke.color;
+       ctx.lineWidth = stroke.size;
+       ctx.lineCap = 'round';
+       ctx.lineJoin = 'round';
+       ctx.stroke();
+    },
+    setInitialStrokes: (strokes) => {
+       strokesHistory.current = strokes;
+       redrawCanvas(strokes);
+    },
+    remoteUndo: (strokeId) => {
+       if (strokeId) {
+           strokesHistory.current = strokesHistory.current.filter(s => s.strokeId !== strokeId);
+       } else {
+           const lastStrokeId = strokesHistory.current.length > 0 ? strokesHistory.current[strokesHistory.current.length - 1].strokeId : null;
+           strokesHistory.current = strokesHistory.current.filter(s => s.strokeId !== lastStrokeId);
+       }
+       redrawCanvas(strokesHistory.current);
+    },
+    remoteClear: () => {
+       strokesHistory.current = [];
+       redrawCanvas([]);
     }
-  }, [externalStrokes, isPlayer]);
+  }));
+
+  useEffect(() => {
+    redrawCanvas([]);
+  }, []);
 
   const startDrawing = (e) => {
     if (!isPlayer) return;
     e.target.setPointerCapture(e.pointerId);
     const { offsetX, offsetY } = e.nativeEvent;
     lastPos.current = { x: offsetX, y: offsetY };
+    currentStrokeId.current = Math.random().toString(36).substr(2, 9);
     setIsDrawing(true);
   };
 
@@ -75,17 +107,21 @@ const Canvas = ({ isPlayer, color, brushSize, socket, roomId, onScoreUpdate, ref
     ctx.lineJoin = 'round';
     ctx.stroke();
 
+    const strokeObj = {
+        strokeId: currentStrokeId.current,
+        startX: lastPos.current.x,
+        startY: lastPos.current.y,
+        endX: offsetX,
+        endY: offsetY,
+        color,
+        size: brushSize
+    };
+    strokesHistory.current.push(strokeObj);
+
     if (socket && roomId) {
       socket.emit('drawData', {
         roomId,
-        strokeData: {
-          startX: lastPos.current.x,
-          startY: lastPos.current.y,
-          endX: offsetX,
-          endY: offsetY,
-          color,
-          size: brushSize
-        }
+        strokeData: strokeObj
       });
     }
 
@@ -99,7 +135,6 @@ const Canvas = ({ isPlayer, color, brushSize, socket, roomId, onScoreUpdate, ref
     }
     setIsDrawing(false);
     
-    // Calculate score after a stroke ends using the normalized baseline
     if (referenceCanvasRef && referenceCanvasRef.current) {
         const newScore = calculateSimilarity(canvasRef.current, referenceCanvasRef.current, baselineScore);
         onScoreUpdate(newScore);
@@ -121,13 +156,14 @@ const Canvas = ({ isPlayer, color, brushSize, socket, roomId, onScoreUpdate, ref
       {showGrid && <div className="grid-overlay"></div>}
     </>
   );
-};
+});
 
 function App() {
   const [socket, setSocket] = useState(null);
   const [roomId, setRoomId] = useState('');
   const [joinRoomId, setJoinRoomId] = useState('');
   const [inGame, setInGame] = useState(false);
+  const [gameStatus, setGameStatus] = useState('lobby'); // lobby, playing, finished
   const [color, setColor] = useState('#000000');
   const [brushSize, setBrushSize] = useState(10);
   const [showGrid, setShowGrid] = useState(false);
@@ -139,11 +175,15 @@ function App() {
   
   const [myScore, setMyScore] = useState(0);
   const [opponentScore, setOpponentScore] = useState(0);
-  const [opponentStrokes, setOpponentStrokes] = useState(null);
-  const [initialOpponentStrokes, setInitialOpponentStrokes] = useState([]);
+  const [timeLeft, setTimeLeft] = useState(180);
+  const [endTime, setEndTime] = useState(null);
+  const [myDiffUrl, setMyDiffUrl] = useState(null);
+  const [oppDiffUrl, setOppDiffUrl] = useState(null);
   
   const referenceImgRef = useRef(null);
   const referenceCanvasRef = useRef(null); 
+  const myCanvasRef = useRef(null);
+  const oppCanvasRef = useRef(null);
 
   // Dynamic colors array starting with basics, populated on image load
   const [colors, setColors] = useState(['#000000', '#FFFFFF']);
@@ -157,25 +197,76 @@ function App() {
         console.log('Connected to server');
     });
 
-    newSocket.on('initialState', ({ strokes, scores, referenceImage }) => {
+    newSocket.on('initialState', ({ strokes, scores, referenceImage, gameStarted, endTime }) => {
         if (referenceImage) {
             setCurrentImage(referenceImage);
             setIsImageLoading(true);
         }
-        // Filter strokes that aren't ours
-        const oppStrokes = strokes.filter(s => s.playerId !== newSocket.id);
-        if (oppStrokes.length > 0) {
-            setInitialOpponentStrokes(oppStrokes);
+        if (gameStarted && endTime) {
+            setEndTime(endTime);
+            setGameStatus('playing');
         }
-        // Set opponent score if available
+        setTimeout(() => {
+            const oppStrokes = strokes.filter(s => s.playerId !== newSocket.id);
+            if (oppStrokes.length > 0 && oppCanvasRef.current) {
+                oppCanvasRef.current.setInitialStrokes(oppStrokes);
+            }
+            const myStrokes = strokes.filter(s => s.playerId === newSocket.id);
+            if (myStrokes.length > 0 && myCanvasRef.current) {
+                myCanvasRef.current.setInitialStrokes(myStrokes);
+            }
+        }, 100);
+        
         const oppId = Object.keys(scores).find(id => id !== newSocket.id);
         if (oppId && scores[oppId] !== undefined) {
             setOpponentScore(scores[oppId]);
         }
     });
 
+    newSocket.on('gameStarted', ({ endTime }) => {
+        setEndTime(endTime);
+        setGameStatus('playing');
+    });
+
+    newSocket.on('gameOver', ({ scores }) => {
+        setGameStatus('finished');
+        if (scores) {
+           if (scores[newSocket.id] !== undefined) setMyScore(scores[newSocket.id]);
+           const oppId = Object.keys(scores).find(id => id !== newSocket.id);
+           if (oppId && scores[oppId] !== undefined) setOpponentScore(scores[oppId]);
+        }
+        
+        // Generate diffs
+        setTimeout(() => {
+            if (referenceCanvasRef.current) {
+                if (myCanvasRef.current) {
+                    const myDiff = generateDiffOverlay(myCanvasRef.current.getCanvas(), referenceCanvasRef.current);
+                    if (myDiff) setMyDiffUrl(myDiff);
+                }
+                if (oppCanvasRef.current) {
+                    const oppDiff = generateDiffOverlay(oppCanvasRef.current.getCanvas(), referenceCanvasRef.current);
+                    if (oppDiff) setOppDiffUrl(oppDiff);
+                }
+            }
+        }, 100);
+    });
+
     newSocket.on('drawData', ({ strokeData }) => {
-        setOpponentStrokes(strokeData);
+        if (oppCanvasRef.current) {
+            oppCanvasRef.current.addExternalStroke(strokeData);
+        }
+    });
+    
+    newSocket.on('undoStroke', ({ playerId, strokeId }) => {
+        if (oppCanvasRef.current) {
+            oppCanvasRef.current.remoteUndo(strokeId);
+        }
+    });
+
+    newSocket.on('clearCanvas', ({ playerId }) => {
+        if (oppCanvasRef.current) {
+            oppCanvasRef.current.remoteClear();
+        }
     });
 
     newSocket.on('scoreUpdate', ({ score }) => {
@@ -185,47 +276,46 @@ function App() {
     return () => newSocket.close();
   }, []);
 
+  useEffect(() => {
+    if (endTime && gameStatus === 'playing') {
+      const interval = setInterval(() => {
+        const remaining = Math.max(0, Math.floor((endTime - Date.now()) / 1000));
+        setTimeLeft(remaining);
+        if (remaining <= 0) {
+            clearInterval(interval);
+        }
+      }, 1000);
+      return () => clearInterval(interval);
+    }
+  }, [endTime, gameStatus]);
+
   const createGame = () => {
     const room = Math.random().toString(36).substring(2, 8).toUpperCase();
     
-    const subjects = [
-      'red apple', 'yellow banana', 'green tree', 'orange carrot', 
-      'blue coffee mug', 'pink donut', 'yellow sun', 'purple flower', 
-      'grey cat face', 'brown dog face', 'red car', 'blue house', 
-      'yellow star', 'green leaf', 'red cherry', 'slice of watermelon'
-    ];
-    
-    // Pick a random subject
-    const subject = subjects[Math.floor(Math.random() * subjects.length)];
-    // Create a strict prompt to ensure simple, flat, 2D art without hands/easels
-    const prompt = `A very simple flat minimal 2d vector illustration of a ${subject}, centered, solid light colored background, no shading, no details, easy to draw, digital art`;
-    
-    const seed = Math.floor(Math.random() * 1000000);
-    const encodedPrompt = encodeURIComponent(prompt);
-    // pollinations.ai gives us a free, instant image generation API without keys
-    const aiImageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=400&height=300&nologo=true&seed=${seed}`;
-    
-    // Proxy the image through our own backend to avoid strict browser CORS policies blocking the canvas from reading it
-    const proxyUrl = `http://localhost:3001/api/proxy-image?url=${encodeURIComponent(aiImageUrl)}`;
+    // Randomly pick one of our 10 beautifully curated reference images
+    const randomImageIndex = Math.floor(Math.random() * 10) + 1;
+    const aiImageUrl = `/reference_${randomImageIndex}.png`;
     
     setRoomId(room);
-    setCurrentImage(proxyUrl);
+    setCurrentImage(aiImageUrl);
     setIsImageLoading(true);
     setInGame(true);
+    setGameStatus('waiting');
   };
 
   const joinGame = () => {
     if (!joinRoomId) return;
     
     if (socket) {
-        socket.emit('checkRoom', joinRoomId.toUpperCase(), (exists) => {
-            if (exists) {
+        socket.emit('checkRoom', joinRoomId.toUpperCase(), (response) => {
+            if (response === true || response.exists) {
                 setJoinError('');
                 setRoomId(joinRoomId.toUpperCase());
                 setIsImageLoading(true);
                 setInGame(true);
+                setGameStatus('waiting');
             } else {
-                setJoinError("Room does not exist! Check the code and try again.");
+                setJoinError(response.error || "Room does not exist! Check the code and try again.");
             }
         });
     }
@@ -245,9 +335,10 @@ function App() {
         
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, 400, 300);
-        // Force the image into 400x300 regardless of original aspect ratio 
-        // to ensure it perfectly matches the player canvas dimensions
-        ctx.drawImage(img, 0, 0, 400, 300);
+        // DiceBear returns 400x400 square images. 
+        // Our canvas is 400x300, and our <img> has object-fit: cover, which trims 50px from top and bottom.
+        // So we draw the image at Y=-50 with height=400 to achieve the exact same mathematical crop on the hidden canvas.
+        ctx.drawImage(img, 0, -50, 400, 400);
 
         // Calculate baseline score (what a blank white canvas scores against this image)
         const baseline = calculateBaseline(referenceCanvasRef.current);
@@ -340,25 +431,45 @@ function App() {
     );
   }
 
+
+
+  const formatTime = (seconds) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
   return (
     <div className="app-container">
       <div className="header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-           <h1>DrawMatch</h1>
-           <p>Room: {roomId}</p>
-        </div>
-        <button 
-          className="btn" 
-          onClick={() => setShowGrid(!showGrid)}
-          style={{ background: showGrid ? 'var(--accent)' : 'var(--panel-bg)' }}
-        >
-          {showGrid ? 'Hide Grid' : 'Show Grid'}
-        </button>
+        {gameStatus === 'finished' ? (
+           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', animation: 'fadeIn 0.5s ease' }}>
+              <h2 style={{ fontSize: '2.5rem', color: '#cbd5e1', letterSpacing: '10px', fontWeight: '300', margin: '20px 0 10px 0', textTransform: 'uppercase' }}>Time's Up</h2>
+              <button className="btn" onClick={() => window.location.reload()} style={{ padding: '10px 40px', fontSize: '1.2rem', borderRadius: '30px', background: 'var(--success)' }}>Play Again</button>
+           </div>
+        ) : (
+           <>
+             <div>
+                <h1>DrawMatch</h1>
+                <p>Room: {roomId}</p>
+             </div>
+             <div style={{ fontSize: '2rem', fontWeight: 'bold', color: timeLeft <= 10 ? 'var(--danger)' : 'white' }}>
+                {endTime ? formatTime(timeLeft) : 'Waiting...'}
+             </div>
+             <button 
+               className="btn" 
+               onClick={() => setShowGrid(!showGrid)}
+               style={{ background: showGrid ? 'var(--accent)' : 'var(--panel-bg)' }}
+             >
+               {showGrid ? 'Hide Grid' : 'Show Grid'}
+             </button>
+           </>
+        )}
       </div>
 
       <canvas ref={referenceCanvasRef} width={400} height={300} style={{ display: 'none' }} />
 
-      <div className="game-area" style={{ position: 'relative' }}>
+      <div className="game-area" style={{ position: 'relative', flexWrap: gameStatus === 'finished' ? 'nowrap' : 'wrap', transform: gameStatus === 'finished' ? 'scale(0.85)' : 'none', transition: 'all 0.5s ease', marginTop: gameStatus === 'finished' ? '-20px' : '0' }}>
         {isImageLoading && (
           <div style={{ position: 'absolute', inset: -20, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', background: 'var(--bg-color)', zIndex: 50, borderRadius: '16px' }}>
             <div style={{ width: '80px', height: '80px', border: '6px solid rgba(255,255,255,0.1)', borderTopColor: '#60a5fa', borderRightColor: '#c084fc', borderRadius: '50%', animation: 'spin 1s linear infinite', boxShadow: '0 0 20px rgba(96, 165, 250, 0.4)' }}></div>
@@ -367,16 +478,32 @@ function App() {
           </div>
         )}
         <div className="canvas-container">
-          <div style={{width: '100%', display: 'flex', justifyContent: 'space-between'}}>
-            <span>You</span>
-            <span>{myScore}% Match</span>
-          </div>
-          <div className="accuracy-bar-container">
-            <div className="accuracy-bar" style={{ width: `${myScore}%` }}></div>
-          </div>
+          {gameStatus === 'finished' ? (
+             <div style={{ position: 'relative', width: '100%', textAlign: 'left', marginBottom: '15px', animation: 'fadeIn 0.8s ease' }}>
+                 <h2 style={{ fontSize: '4.5rem', margin: 0, fontWeight: '400', color: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    {myScore}
+                    {myScore > opponentScore && (
+                        <div style={{ color: '#ef4444', border: '4px solid #ef4444', borderRadius: '12px', padding: '5px 15px', fontSize: '2rem', fontWeight: '900', letterSpacing: '3px', transform: 'rotate(-8deg)', boxShadow: '0 4px 20px rgba(239, 68, 68, 0.3)', background: 'rgba(15,23,42,0.8)' }}>
+                            WINNER!
+                        </div>
+                    )}
+                 </h2>
+             </div>
+          ) : (
+             <>
+               <div style={{width: '100%', display: 'flex', justifyContent: 'space-between'}}>
+                 <span>You</span>
+                 <span>{myScore}% Match</span>
+               </div>
+               <div className="accuracy-bar-container">
+                 <div className="accuracy-bar" style={{ width: `${myScore}%` }}></div>
+               </div>
+             </>
+          )}
           <div className="canvas-wrapper" style={{ width: 400, height: 300, position: 'relative' }}>
             <Canvas 
-                isPlayer={true} 
+                ref={myCanvasRef}
+                isPlayer={gameStatus === 'playing'} 
                 color={color} 
                 brushSize={brushSize} 
                 socket={socket} 
@@ -384,50 +511,81 @@ function App() {
                 onScoreUpdate={updateMyScore}
                 referenceCanvasRef={referenceCanvasRef}
                 showGrid={showGrid}
-                currentScore={myScore}
                 baselineScore={baselineScore}
             />
+            {gameStatus === 'waiting' && (
+              <div style={{ position: 'absolute', inset: 0, background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(3px)', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', zIndex: 10 }}>
+                 <div style={{ width: '45px', height: '45px', border: '4px solid rgba(255,255,255,0.1)', borderTopColor: '#60a5fa', borderRadius: '50%', animation: 'spin 1s linear infinite', marginBottom: '15px' }}></div>
+                 <h3 style={{ color: 'white', textShadow: '0 2px 4px rgba(0,0,0,0.5)', marginBottom: '8px', fontSize: '1.3rem' }}>Waiting for Opponent...</h3>
+                 <p style={{ color: 'var(--text-secondary)', fontSize: '1rem' }}>Room Code: <strong style={{color: 'white', background: 'rgba(255,255,255,0.15)', padding: '3px 8px', borderRadius: '6px', letterSpacing: '1px'}}>{roomId}</strong></p>
+              </div>
+            )}
+            {gameStatus === 'finished' && myDiffUrl && (
+                <img src={myDiffUrl} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 20, animation: 'fadeIn 1s ease 0.5s forwards', opacity: 0 }} alt="Error Highlight" />
+            )}
           </div>
           
-          <div className="toolbar glass-panel">
-            <div className="color-picker" style={{ flexWrap: 'wrap', maxWidth: '180px' }}>
+          {gameStatus !== 'finished' && (
+            <div className="toolbar-container" style={{ display: 'flex', flexWrap: 'wrap', gap: '15px', width: '100%', maxWidth: '400px', justifyContent: 'center', marginTop: '15px' }}>
+            
+            {/* Color Dock */}
+            <div className="glass-panel color-picker" style={{ display: 'flex', gap: '10px', alignItems: 'center', padding: '10px 16px', borderRadius: '30px', overflowX: 'auto', maxWidth: '100%', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
               {colors.map((c, i) => (
                 <div 
                   key={i}
-                  className={`color-btn ${color === c ? 'active' : ''}`}
-                  style={{ backgroundColor: c }}
+                  style={{ backgroundColor: c, flexShrink: 0, width: '26px', height: '26px', border: color === c ? '2px solid white' : '2px solid transparent', transform: color === c ? 'scale(1.1)' : 'none', transition: 'all 0.2s', cursor: 'pointer', borderRadius: '50%' }}
                   onClick={() => setColor(c)}
                   title={c}
                 />
               ))}
+              <div style={{ width: '1px', height: '20px', background: 'rgba(255,255,255,0.2)', margin: '0 5px', flexShrink: 0 }}></div>
               <button 
                 onClick={() => setIsEyedropper(!isEyedropper)}
                 style={{ 
-                    width: '30px', height: '30px', borderRadius: '50%', 
-                    background: isEyedropper ? 'white' : 'transparent', 
-                    color: isEyedropper ? 'black' : 'white',
-                    border: '2px solid white', cursor: 'pointer',
+                    width: '28px', height: '28px', borderRadius: '50%', 
+                    background: isEyedropper ? 'var(--accent)' : 'transparent', 
+                    color: isEyedropper ? 'white' : 'var(--text-secondary)',
+                    border: 'none', cursor: 'pointer',
                     display: 'flex', justifyContent: 'center', alignItems: 'center',
-                    fontSize: '12px'
+                    fontSize: '14px', flexShrink: 0, transition: 'all 0.2s',
                 }}
                 title="Pick color from painting"
               >
                 💧
               </button>
             </div>
-            <div className="brush-sizes">
-              {[5, 15, 30].map(size => (
-                <button 
-                  key={size}
-                  className={`size-btn ${brushSize === size ? 'active' : ''}`}
-                  onClick={() => setBrushSize(size)}
-                  style={{ width: '40px', height: '40px' }}
-                >
-                  <div className="size-dot" style={{ width: size, height: size, background: color === '#FFFFFF' ? '#000' : color }}></div>
-                </button>
-              ))}
+            
+            {/* Brush Dock */}
+            <div className="glass-panel" style={{ display: 'flex', gap: '8px', alignItems: 'center', padding: '8px 16px', borderRadius: '30px', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
+                {[5, 15, 30].map(size => (
+                  <button 
+                    key={size}
+                    onClick={() => setBrushSize(size)}
+                    style={{ 
+                        width: '32px', height: '32px', borderRadius: '50%', border: 'none',
+                        background: brushSize === size ? 'rgba(255,255,255,0.1)' : 'transparent',
+                        display: 'flex', justifyContent: 'center', alignItems: 'center',
+                        cursor: 'pointer', transition: 'background 0.2s'
+                    }}
+                  >
+                    <div style={{ width: size, height: size, background: color === '#FFFFFF' ? '#000' : color, borderRadius: '50%' }}></div>
+                  </button>
+                ))}
+            </div>
+
+            {/* Action Dock */}
+            <div className="glass-panel" style={{ display: 'flex', gap: '10px', alignItems: 'center', padding: '8px 12px', borderRadius: '30px', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
+                  <button onClick={() => myCanvasRef.current?.undo()} style={{ padding: '8px 14px', background: 'transparent', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '6px', color: 'white', fontSize: '0.9rem', cursor: 'pointer', transition: 'background 0.2s' }} onMouseOver={e => e.currentTarget.style.background='rgba(255,255,255,0.1)'} onMouseOut={e => e.currentTarget.style.background='transparent'}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>
+                    Undo
+                  </button>
+                  <button onClick={() => myCanvasRef.current?.clear()} style={{ padding: '8px 14px', background: 'linear-gradient(135deg, #ef4444, #dc2626)', border: 'none', borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '6px', color: 'white', fontSize: '0.9rem', cursor: 'pointer', boxShadow: '0 4px 10px rgba(239,68,68,0.3)' }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                    Clear
+                  </button>
             </div>
           </div>
+          )}
         </div>
 
         <div className="reference-container" style={{ width: 400, height: 300, cursor: isEyedropper ? 'crosshair' : 'default', position: 'relative' }} onClick={handleReferenceClick}>
@@ -444,20 +602,37 @@ function App() {
         </div>
 
         <div className="canvas-container">
-          <div style={{width: '100%', display: 'flex', justifyContent: 'space-between'}}>
-            <span>Opponent</span>
-            <span>{opponentScore}% Match</span>
-          </div>
-          <div className="accuracy-bar-container">
-            <div className="accuracy-bar" style={{ width: `${opponentScore}%` }}></div>
-          </div>
+          {gameStatus === 'finished' ? (
+             <div style={{ position: 'relative', width: '100%', textAlign: 'left', marginBottom: '15px', animation: 'fadeIn 0.8s ease' }}>
+                 <h2 style={{ fontSize: '4.5rem', margin: 0, fontWeight: '400', color: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    {opponentScore}
+                    {opponentScore > myScore && (
+                        <div style={{ color: '#ef4444', border: '4px solid #ef4444', borderRadius: '12px', padding: '5px 15px', fontSize: '2rem', fontWeight: '900', letterSpacing: '3px', transform: 'rotate(8deg)', boxShadow: '0 4px 20px rgba(239, 68, 68, 0.3)', background: 'rgba(15,23,42,0.8)' }}>
+                            WINNER!
+                        </div>
+                    )}
+                 </h2>
+             </div>
+          ) : (
+             <>
+               <div style={{width: '100%', display: 'flex', justifyContent: 'space-between'}}>
+                 <span>Opponent</span>
+                 <span>{opponentScore}% Match</span>
+               </div>
+               <div className="accuracy-bar-container">
+                 <div className="accuracy-bar" style={{ width: `${opponentScore}%` }}></div>
+               </div>
+             </>
+          )}
           <div className="canvas-wrapper" style={{ width: 400, height: 300, position: 'relative' }}>
+             {gameStatus === 'finished' && oppDiffUrl && (
+                <img src={oppDiffUrl} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 20, animation: 'fadeIn 1s ease 0.5s forwards', opacity: 0 }} alt="Error Highlight" />
+             )}
             <Canvas 
+                ref={oppCanvasRef}
                 isPlayer={false} 
                 color="#000" 
                 brushSize={10} 
-                externalStrokes={opponentStrokes}
-                initialStrokes={initialOpponentStrokes}
                 showGrid={showGrid}
             />
           </div>

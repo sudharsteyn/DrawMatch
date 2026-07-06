@@ -80,3 +80,74 @@ export const calculateBaseline = (referenceCanvas) => {
 
   return getRawSimilarity(blankCtx, refCtx, sampleWidth, sampleHeight);
 };
+
+export const generateDiffOverlay = (playerCanvas, referenceCanvas) => {
+  if (!playerCanvas || !referenceCanvas) return null;
+
+  const width = playerCanvas.width;
+  const height = playerCanvas.height;
+
+  const tempPlayer = document.createElement('canvas');
+  tempPlayer.width = width;
+  tempPlayer.height = height;
+  const pCtx = tempPlayer.getContext('2d', { willReadFrequently: true });
+  pCtx.drawImage(playerCanvas, 0, 0);
+
+  const tempRef = document.createElement('canvas');
+  tempRef.width = width;
+  tempRef.height = height;
+  const rCtx = tempRef.getContext('2d', { willReadFrequently: true });
+  rCtx.drawImage(referenceCanvas, 0, 0);
+
+  const pData = pCtx.getImageData(0, 0, width, height).data;
+  const rData = rCtx.getImageData(0, 0, width, height).data;
+
+  const maskCanvas = document.createElement('canvas');
+  maskCanvas.width = width;
+  maskCanvas.height = height;
+  const mCtx = maskCanvas.getContext('2d');
+  const maskImgData = mCtx.createImageData(width, height);
+  const mData = maskImgData.data;
+
+  // Tolerance for difference (sum of RGB diffs). Max is 765. 
+  const THRESHOLD = 120; 
+
+  for (let i = 0; i < pData.length; i += 4) {
+    const rDiff = Math.abs(pData[i] - rData[i]);
+    const gDiff = Math.abs(pData[i+1] - rData[i+1]);
+    const bDiff = Math.abs(pData[i+2] - rData[i+2]);
+    
+    if (rDiff + gDiff + bDiff > THRESHOLD) {
+       // Mark this pixel as solid in the mask
+       mData[i] = 0;
+       mData[i+1] = 0;
+       mData[i+2] = 0;
+       mData[i+3] = 255; // Fully opaque mask
+    } else {
+       mData[i+3] = 0;   // Transparent
+    }
+  }
+  mCtx.putImageData(maskImgData, 0, 0);
+
+  // Now create the final overlay with red hashes
+  const diffCanvas = document.createElement('canvas');
+  diffCanvas.width = width;
+  diffCanvas.height = height;
+  const dCtx = diffCanvas.getContext('2d');
+
+  // Draw diagonal lines
+  dCtx.strokeStyle = 'rgba(239, 68, 68, 0.7)'; // Red hashes
+  dCtx.lineWidth = 3;
+  dCtx.beginPath();
+  for (let i = -height; i < width * 2; i += 12) {
+      dCtx.moveTo(i, 0);
+      dCtx.lineTo(i - height, height);
+  }
+  dCtx.stroke();
+
+  // Mask it!
+  dCtx.globalCompositeOperation = 'destination-in';
+  dCtx.drawImage(maskCanvas, 0, 0);
+
+  return diffCanvas.toDataURL();
+};

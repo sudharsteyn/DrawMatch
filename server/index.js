@@ -57,7 +57,8 @@ io.on('connection', (socket) => {
         gameStarted: false,
         referenceImage: imageSrc || `/reference_${Math.floor(Math.random() * 4) + 1}.png`,
         strokes: [], // Store all strokes for robust syncing
-        scores: {}   // Store latest scores
+        scores: {},   // Store latest scores
+        endTime: null
       };
     }
 
@@ -71,11 +72,27 @@ io.on('connection', (socket) => {
     socket.emit('initialState', { 
         strokes: rooms[roomId].strokes,
         scores: rooms[roomId].scores,
-        referenceImage: rooms[roomId].referenceImage
+        referenceImage: rooms[roomId].referenceImage,
+        gameStarted: rooms[roomId].gameStarted,
+        endTime: rooms[roomId].endTime
     });
 
     // Notify room of player update
     io.to(roomId).emit('roomUpdate', { players: rooms[roomId].players });
+    
+    // Start game if 2 players are here
+    if (rooms[roomId].players.length === 2 && !rooms[roomId].gameStarted) {
+        rooms[roomId].gameStarted = true;
+        const endTime = Date.now() + 180000; // 3 minutes
+        rooms[roomId].endTime = endTime;
+        io.to(roomId).emit('gameStarted', { endTime });
+        
+        setTimeout(() => {
+            if (rooms[roomId]) {
+                io.to(roomId).emit('gameOver', { scores: rooms[roomId].scores });
+            }
+        }, 180000);
+    }
   });
 
   socket.on('drawData', ({ roomId, strokeData }) => {
@@ -88,6 +105,31 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('undoStroke', ({ roomId }) => {
+    if (rooms[roomId]) {
+      const strokes = rooms[roomId].strokes;
+      let lastStrokeId = null;
+      for (let i = strokes.length - 1; i >= 0; i--) {
+        if (strokes[i].playerId === socket.id) {
+          lastStrokeId = strokes[i].strokeId;
+          break;
+        }
+      }
+      if (lastStrokeId) {
+          rooms[roomId].strokes = strokes.filter(s => s.strokeId !== lastStrokeId);
+      }
+      socket.to(roomId).emit('undoStroke', { playerId: socket.id, strokeId: lastStrokeId });
+    }
+  });
+
+  socket.on('clearCanvas', ({ roomId }) => {
+    if (rooms[roomId]) {
+      rooms[roomId].strokes = rooms[roomId].strokes.filter(s => s.playerId !== socket.id);
+      rooms[roomId].scores[socket.id] = 0;
+      socket.to(roomId).emit('clearCanvas', { playerId: socket.id });
+    }
+  });
+
   socket.on('scoreUpdate', ({ roomId, score }) => {
      if (rooms[roomId]) {
          rooms[roomId].scores[socket.id] = score;
@@ -96,8 +138,13 @@ io.on('connection', (socket) => {
   });
 
   socket.on('checkRoom', (roomId, callback) => {
-    // Return true if the room exists
-    callback(!!rooms[roomId]);
+    if (!rooms[roomId]) {
+        callback({ exists: false, error: "Room does not exist! Check the code and try again." });
+    } else if (rooms[roomId].players.length >= 2) {
+        callback({ exists: false, error: "Room is full! Maximum 2 players allowed." });
+    } else {
+        callback({ exists: true });
+    }
   });
 
   socket.on('disconnect', () => {
