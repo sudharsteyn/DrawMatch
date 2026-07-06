@@ -1,6 +1,17 @@
 {
+  "name": "drawmatch-multiplayer",
+  "version": "1.0.0",
+  "description": "Unified hosting for DrawMatch",
+  "scripts": {
+    "install": "npm install --prefix server && npm install --prefix client",
+    "build": "npm run build --prefix client",
+    "start": "npm start --prefix server"
+  },
   "dependencies": {
     "react-icons": "^5.7.0",
     "socket.io-client": "^4.8.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
