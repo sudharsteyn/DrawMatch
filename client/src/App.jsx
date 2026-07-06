@@ -515,6 +515,11 @@ function App() {
                             WINNER!
                         </div>
                     )}
+                    {(myScore === opponentScore && !opponentLeft) && (
+                        <div style={{ color: '#f59e0b', border: '4px solid #f59e0b', borderRadius: '12px', padding: '5px 15px', fontSize: '2rem', fontWeight: '900', letterSpacing: '3px', transform: 'rotate(-8deg)', boxShadow: '0 4px 20px rgba(245, 158, 11, 0.3)', background: 'rgba(15,23,42,0.8)' }}>
+                            DRAW!
+                        </div>
+                    )}
                  </h2>
              </div>
           ) : (
@@ -634,9 +639,14 @@ function App() {
              <div style={{ position: 'relative', width: '100%', textAlign: 'left', marginBottom: '15px', animation: 'fadeIn 0.8s ease' }}>
                  <h2 style={{ fontSize: '4.5rem', margin: 0, fontWeight: '400', color: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     {opponentScore}
-                    {opponentScore > myScore && (
+                    {opponentScore > myScore && !opponentLeft && (
                         <div style={{ color: '#ef4444', border: '4px solid #ef4444', borderRadius: '12px', padding: '5px 15px', fontSize: '2rem', fontWeight: '900', letterSpacing: '3px', transform: 'rotate(8deg)', boxShadow: '0 4px 20px rgba(239, 68, 68, 0.3)', background: 'rgba(15,23,42,0.8)' }}>
                             WINNER!
+                        </div>
+                    )}
+                    {(myScore === opponentScore && !opponentLeft) && (
+                        <div style={{ color: '#f59e0b', border: '4px solid #f59e0b', borderRadius: '12px', padding: '5px 15px', fontSize: '2rem', fontWeight: '900', letterSpacing: '3px', transform: 'rotate(8deg)', boxShadow: '0 4px 20px rgba(245, 158, 11, 0.3)', background: 'rgba(15,23,42,0.8)' }}>
+                            DRAW!
                         </div>
                     )}
                  </h2>
