@@ -2,6 +2,7 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
+const path = require('path');
 
 const app = express();
 app.use(cors());
@@ -32,6 +33,14 @@ app.get('/api/proxy-image', async (req, res) => {
         console.error('Image proxy error:', e.message);
         res.status(500).send('Proxy error');
     }
+});
+
+// Serve static files from the React frontend build
+app.use(express.static(path.join(__dirname, '../client/dist')));
+
+// Catch-all route to serve index.html for React Router (if used) and direct navigation
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../client/dist/index.html'));
 });
 
 const server = http.createServer(app);
