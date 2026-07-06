@@ -39,7 +39,7 @@ app.get('/api/proxy-image', async (req, res) => {
 app.use(express.static(path.join(__dirname, '../client/dist')));
 
 // Catch-all route to serve index.html for React Router (if used) and direct navigation
-app.get('*', (req, res) => {
+app.use((req, res) => {
   res.sendFile(path.join(__dirname, '../client/dist/index.html'));
 });
 
