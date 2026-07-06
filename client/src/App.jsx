@@ -292,9 +292,13 @@ function App() {
   const createGame = () => {
     const room = Math.random().toString(36).substring(2, 8).toUpperCase();
     
-    // Randomly pick one of our 10 beautifully curated reference images
-    const randomImageIndex = Math.floor(Math.random() * 10) + 1;
-    const aiImageUrl = `/reference_${randomImageIndex}.png`;
+    // DiceBear endpoints that produce colorful, flat, fun-to-draw images
+    const styles = ['bottts', 'shapes', 'thumbs', 'rings', 'icons', 'fun-emoji'];
+    const randomStyle = styles[Math.floor(Math.random() * styles.length)];
+    const seed = Math.random().toString(36).substring(2, 10);
+    
+    // Generate a beautiful avatar/shape directly via the free, reliable DiceBear API
+    const aiImageUrl = `https://api.dicebear.com/7.x/${randomStyle}/png?seed=${seed}&backgroundColor=e2e8f0,f8fafc,fef08a,fbcfe8,bfdbfe&size=400`;
     
     setRoomId(room);
     setCurrentImage(aiImageUrl);
@@ -354,9 +358,10 @@ function App() {
   };
 
   const handleImageError = () => {
-     // If the proxy or AI fails, immediately fallback to a built-in image
+     // If the API fails, randomly fallback to one of our 10 beautifully curated default images
      console.warn('Failed to load AI image. Falling back to default.');
-     setCurrentImage('/reference_1.png');
+     const randomFallbackIndex = Math.floor(Math.random() * 10) + 1;
+     setCurrentImage(`/reference_${randomFallbackIndex}.png`);
   };
 
   const handleReferenceClick = (e) => {
