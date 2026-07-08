@@ -2,11 +2,14 @@ import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } f
 import { io } from 'socket.io-client';
 import { calculateSimilarity, calculateBaseline, generateDiffOverlay } from './utils/imageCompare';
 import { extractColorsFromCanvas } from './utils/extractColors';
+import { playClick, playTick, playWin, playLose, startDrawingSound, stopDrawingSound } from './utils/audio';
 
-const Canvas = forwardRef(({ isPlayer, color, brushSize, socket, roomId, onScoreUpdate, referenceCanvasRef, showGrid, baselineScore }, ref) => {
+const Canvas = forwardRef(({ isPlayer, color, brushSize, socket, roomId, onScoreUpdate, referenceCanvasRef, showGrid, baselineScore, isLineTool }, ref) => {
   const canvasRef = useRef(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const lastPos = useRef(null);
+  const lineStartPos = useRef(null);
+  const previewEndPos = useRef(null);
   const currentStrokeId = useRef(null);
   const strokesHistory = useRef([]);
 
@@ -106,14 +109,32 @@ const Canvas = forwardRef(({ isPlayer, color, brushSize, socket, roomId, onScore
     e.target.setPointerCapture(e.pointerId);
     const { x, y } = getCoordinates(e);
     lastPos.current = { x, y };
+    lineStartPos.current = { x, y };
+    previewEndPos.current = { x, y };
     currentStrokeId.current = Math.random().toString(36).substr(2, 9);
     setIsDrawing(true);
+    startDrawingSound();
   };
 
   const draw = (e) => {
     if (!isDrawing || !isPlayer) return;
     const { x: currentX, y: currentY } = getCoordinates(e);
-    // Removed manual tiny-segment stroking to prevent alpha dotting
+    
+    if (isLineTool) {
+        previewEndPos.current = { x: currentX, y: currentY };
+        redrawCanvas(strokesHistory.current);
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext('2d');
+        ctx.beginPath();
+        ctx.moveTo(lineStartPos.current.x, lineStartPos.current.y);
+        ctx.lineTo(currentX, currentY);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = brushSize;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.stroke();
+        return;
+    }
 
     const strokeObj = {
         strokeId: currentStrokeId.current,
@@ -139,9 +160,28 @@ const Canvas = forwardRef(({ isPlayer, color, brushSize, socket, roomId, onScore
 
   const endDrawing = (e) => {
     if (!isPlayer) return;
+    stopDrawingSound();
     if (e && e.target && e.pointerId) {
         e.target.releasePointerCapture(e.pointerId);
     }
+    
+    if (isDrawing && isLineTool && lineStartPos.current && previewEndPos.current) {
+        const strokeObj = {
+            strokeId: currentStrokeId.current,
+            startX: lineStartPos.current.x,
+            startY: lineStartPos.current.y,
+            endX: previewEndPos.current.x,
+            endY: previewEndPos.current.y,
+            color,
+            size: brushSize
+        };
+        strokesHistory.current.push(strokeObj);
+        redrawCanvas(strokesHistory.current);
+        if (socket && roomId) {
+            socket.emit('drawData', { roomId, strokeData: strokeObj });
+        }
+    }
+    
     setIsDrawing(false);
     
     if (referenceCanvasRef && referenceCanvasRef.current) {
@@ -177,7 +217,10 @@ function App() {
   const [opacity, setOpacity] = useState(1);
   const [brushSize, setBrushSize] = useState(10);
   const [isEraser, setIsEraser] = useState(false);
+  const [isLineTool, setIsLineTool] = useState(false);
   const [showGrid, setShowGrid] = useState(false);
+  const [gameCategory, setGameCategory] = useState('shapes');
+  const [customImageDataUrl, setCustomImageDataUrl] = useState(null);
   const [isEyedropper, setIsEyedropper] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [currentImage, setCurrentImage] = useState('/reference_2.png');
@@ -374,34 +417,80 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (endTime && gameStatus === 'playing') {
-      const interval = setInterval(() => {
-        const remaining = Math.max(0, Math.floor((endTime - Date.now()) / 1000));
-        setTimeLeft(remaining);
-        if (remaining <= 0) {
-            clearInterval(interval);
-        }
-      }, 1000);
-      return () => clearInterval(interval);
+    let interval;
+    if (gameStatus === 'playing' && endTime) {
+        interval = setInterval(() => {
+            const remaining = Math.max(0, Math.floor((endTime - Date.now()) / 1000));
+            setTimeLeft(remaining);
+            if (remaining > 0 && remaining <= 10) {
+                playTick();
+            }
+            if (remaining <= 0) {
+                clearInterval(interval);
+            }
+        }, 1000);
     }
+    return () => clearInterval(interval);
   }, [endTime, gameStatus]);
 
-  const createGame = () => {
+  useEffect(() => {
+      if (gameStatus === 'finished') {
+          if (myScore > opponentScore || opponentLeft) {
+              playWin();
+          } else if (opponentScore > myScore && !opponentLeft) {
+              playLose();
+          } else {
+              playWin(); // Draw sound is same as win for now
+          }
+      }
+  }, [gameStatus, myScore, opponentScore, opponentLeft]);
+
+  const handleImageUpload = (e) => {
+      const file = e.target.files[0];
+      if (file) {
+          const reader = new FileReader();
+          reader.onload = (event) => setCustomImageDataUrl(event.target.result);
+          reader.readAsDataURL(file);
+      }
+  };
+
+  const createGame = async () => {
+    if (gameCategory === 'custom' && !customImageDataUrl) {
+        alert('Please select an image first!');
+        return;
+    }
+    
     const room = Math.random().toString(36).substring(2, 8).toUpperCase();
+    let finalImageUrl = '';
     
-    // DiceBear endpoints that produce colorful, flat, fun-to-draw images
-    const styles = ['bottts', 'shapes', 'thumbs', 'rings', 'icons', 'fun-emoji'];
-    const randomStyle = styles[Math.floor(Math.random() * styles.length)];
-    const seed = Math.random().toString(36).substring(2, 10);
-    
-    // Generate a beautiful avatar/shape directly via the free, reliable DiceBear API as an SVG for infinite resolution
-    const aiImageUrl = `https://api.dicebear.com/7.x/${randomStyle}/svg?seed=${seed}&backgroundColor=e2e8f0,f8fafc,fef08a,fbcfe8,bfdbfe`;
+    if (gameCategory === 'custom') {
+        try {
+            const res = await fetch('/api/upload-image', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image: customImageDataUrl })
+            });
+            const data = await res.json();
+            finalImageUrl = `/api/custom-image/${data.id}`;
+        } catch (e) {
+            console.error('Failed to upload custom image:', e);
+            return;
+        }
+    } else {
+        const seed = Math.random().toString(36).substring(2, 10);
+        const aiImageUrl = `https://api.dicebear.com/7.x/${gameCategory}/svg?seed=${seed}&backgroundColor=e2e8f0,f8fafc,fef08a,fbcfe8,bfdbfe`;
+        finalImageUrl = `/api/proxy-image?url=${encodeURIComponent(aiImageUrl)}`;
+    }
     
     setRoomId(room);
-    setCurrentImage(`/api/proxy-image?url=${encodeURIComponent(aiImageUrl)}`);
+    setCurrentImage(finalImageUrl);
     setIsImageLoading(true);
     setInGame(true);
     setGameStatus('waiting');
+    
+    if (socket) {
+        socket.emit('joinRoom', { roomId: room, imageSrc: finalImageUrl, category: gameCategory });
+    }
   };
 
   const joinGame = () => {
@@ -434,25 +523,24 @@ function App() {
   const handleImageLoad = () => {
     const img = referenceImgRef.current;
     if (img && referenceCanvasRef.current) {
-        const ctx = referenceCanvasRef.current.getContext('2d', { willReadFrequently: true });
-        
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, 400, 300);
-        // DiceBear returns 400x400 square images. 
-        // Our canvas is 400x300, and our <img> has object-fit: cover, which trims 50px from top and bottom.
-        // So we draw the image at Y=-50 with height=400 to achieve the exact same mathematical crop on the hidden canvas.
-        ctx.drawImage(img, 0, -50, 400, 400);
+        try {
+            const ctx = referenceCanvasRef.current.getContext('2d', { willReadFrequently: true });
+            
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, 400, 300);
+            ctx.drawImage(img, 0, -50, 400, 400);
 
-        // Calculate baseline score (what a blank white canvas scores against this image)
-        const baseline = calculateBaseline(referenceCanvasRef.current);
-        setBaselineScore(baseline);
+            const baseline = calculateBaseline(referenceCanvasRef.current);
+            setBaselineScore(baseline);
 
-        // Dynamically extract dominant colors
-        const extractedColors = extractColorsFromCanvas(referenceCanvasRef.current, 8);
-        setColors(extractedColors);
-        setColor(extractedColors[0]); // Set first color as active
-        
-        setIsImageLoading(false);
+            const extractedColors = extractColorsFromCanvas(referenceCanvasRef.current, 8);
+            setColors(extractedColors);
+            setColor(extractedColors[0]);
+        } catch (e) {
+            console.error('Failed to process image:', e);
+        } finally {
+            setIsImageLoading(false);
+        }
     }
   };
 
@@ -496,6 +584,7 @@ function App() {
     }
   };
 
+
   const updateMyScore = (score) => {
       setMyScore(score);
       if (socket && roomId) {
@@ -514,6 +603,41 @@ function App() {
           <p style={{ marginBottom: '30px', color: 'var(--text-secondary)' }}>Can you copy the masterpiece?</p>
           
           <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+            <div style={{ display: 'flex', gap: '10px' }}>
+                <select 
+                    value={gameCategory} 
+                    onChange={(e) => setGameCategory(e.target.value)}
+                    style={{ padding: '12px 15px', borderRadius: '8px', border: 'none', flex: 1, outline: 'none', background: 'rgba(255,255,255,0.1)', color: 'white', fontSize: '1rem', cursor: 'pointer' }}
+                >
+                    <option value="shapes" style={{color: 'black'}}>Abstract Shapes</option>
+                    <option value="pixel-art" style={{color: 'black'}}>Pixel Art</option>
+                    <option value="avataaars" style={{color: 'black'}}>Avatars</option>
+                    <option value="bottts" style={{color: 'black'}}>Robots</option>
+                    <option value="adventurer" style={{color: 'black'}}>Adventurer</option>
+                    <option value="croodles" style={{color: 'black'}}>Croodles</option>
+                    <option value="identicon" style={{color: 'black'}}>Identicons</option>
+                    <option value="micah" style={{color: 'black'}}>Micah</option>
+                    <option value="miniavs" style={{color: 'black'}}>Mini Avatars</option>
+                    <option value="open-peeps" style={{color: 'black'}}>Open Peeps</option>
+                    <option value="personas" style={{color: 'black'}}>Personas</option>
+                    <option value="custom" style={{color: 'black'}}>Upload Custom Image</option>
+                </select>
+            </div>
+            
+            {gameCategory === 'custom' && (
+                <div style={{ background: 'rgba(255,255,255,0.05)', padding: '15px', borderRadius: '8px', border: '1px dashed rgba(255,255,255,0.2)' }}>
+                    <input 
+                        type="file" 
+                        accept="image/*" 
+                        onChange={handleImageUpload} 
+                        style={{ color: 'white' }}
+                    />
+                    {customImageDataUrl && (
+                        <div style={{ marginTop: '10px', fontSize: '0.9rem', color: '#10b981' }}>✓ Image loaded successfully</div>
+                    )}
+                </div>
+            )}
+            
             <button className="btn" onClick={createGame}>Create New Game</button>
             
             <div style={{ margin: '15px 0', borderBottom: '1px solid var(--border-color)' }}></div>
@@ -681,6 +805,7 @@ function App() {
                   referenceCanvasRef={referenceCanvasRef}
                   showGrid={showGrid && gameStatus !== 'finished'}
                   baselineScore={baselineScore}
+                  isLineTool={isLineTool}
               />
               {gameStatus === 'waiting' && (
                 <div style={{ position: 'absolute', inset: 0, background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(3px)', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', zIndex: 10 }}>
@@ -720,7 +845,7 @@ function App() {
                 <div 
                   key={i}
                   style={{ backgroundColor: c, flexShrink: 0, width: '26px', height: '26px', border: color === c ? '2px solid white' : '2px solid transparent', transform: color === c ? 'scale(1.1)' : 'none', transition: 'all 0.2s', cursor: 'pointer', borderRadius: '50%' }}
-                  onClick={() => setColor(c)}
+                  onClick={() => { setColor(c); playClick(); }}
                   title={c}
                 />
               ))}
@@ -782,11 +907,14 @@ function App() {
                   <button onClick={() => setIsEraser(!isEraser)} style={{ padding: '8px 14px', background: isEraser ? 'rgba(255,255,255,0.2)' : 'transparent', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '6px', color: 'white', fontSize: '0.9rem', cursor: 'pointer', transition: 'background 0.2s' }}>
                     🧼 Eraser
                   </button>
-                  <button onClick={() => myCanvasRef.current?.undo()} style={{ padding: '8px 14px', background: 'transparent', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '6px', color: 'white', fontSize: '0.9rem', cursor: 'pointer', transition: 'background 0.2s' }} onMouseOver={e => e.currentTarget.style.background='rgba(255,255,255,0.1)'} onMouseOut={e => e.currentTarget.style.background='transparent'}>
+                  <button onClick={() => setIsLineTool(!isLineTool)} style={{ padding: '8px 14px', background: isLineTool ? 'rgba(255,255,255,0.2)' : 'transparent', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '6px', color: 'white', fontSize: '0.9rem', cursor: 'pointer', transition: 'background 0.2s' }}>
+                    📏 Line
+                  </button>
+                  <button onClick={() => { myCanvasRef.current?.undo(); playClick(); }} style={{ padding: '8px 14px', background: 'transparent', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '6px', color: 'white', fontSize: '0.9rem', cursor: 'pointer', transition: 'background 0.2s' }} onMouseOver={e => e.currentTarget.style.background='rgba(255,255,255,0.1)'} onMouseOut={e => e.currentTarget.style.background='transparent'}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>
                     Undo
                   </button>
-                  <button onClick={() => myCanvasRef.current?.clear()} style={{ padding: '8px 14px', background: 'linear-gradient(135deg, #ef4444, #dc2626)', border: 'none', borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '6px', color: 'white', fontSize: '0.9rem', cursor: 'pointer', boxShadow: '0 4px 10px rgba(239,68,68,0.3)' }}>
+                  <button onClick={() => { myCanvasRef.current?.clear(); playClick(); }} style={{ padding: '8px 14px', background: 'linear-gradient(135deg, #ef4444, #dc2626)', border: 'none', borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '6px', color: 'white', fontSize: '0.9rem', cursor: 'pointer', boxShadow: '0 4px 10px rgba(239,68,68,0.3)' }}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                     Clear
                   </button>
