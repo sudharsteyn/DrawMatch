@@ -12,6 +12,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "canvas-confetti": "^1.9.4",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-icons": "^5.7.0",

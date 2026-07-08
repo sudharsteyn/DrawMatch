@@ -1,8 +1,11 @@
+require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const path = require('path');
+
+const MATCH_DURATION = parseInt(process.env.MATCH_DURATION_SECONDS || 180) * 1000;
 
 const app = express();
 app.use(cors());
@@ -147,7 +150,7 @@ io.on('connection', (socket) => {
         setTimeout(() => {
             if (rooms[roomId] && rooms[roomId].players.length === 2 && !rooms[roomId].gameStarted) {
                 rooms[roomId].gameStarted = true;
-                const endTime = Date.now() + 180000; // 3 minutes
+                const endTime = Date.now() + MATCH_DURATION;
                 rooms[roomId].endTime = endTime;
                 io.to(roomId).emit('gameStarted', { endTime });
                 
@@ -158,7 +161,7 @@ io.on('connection', (socket) => {
                         io.to(roomId).emit('gameOver', { scores: rooms[roomId].scores });
                         rooms[roomId].gameStarted = false; // Prevent 'opponentLeft' forfeit logic after the game naturally ends
                     }
-                }, 180000);
+                }, MATCH_DURATION);
             }
         }, 1000);
     }
