@@ -1791,83 +1791,52 @@ function App() {
 
           {gameStatus !== 'finished' && (
             <div
-              className='toolbar-container'
+              className='toolbar-container glass-panel'
               style={{
                 display: 'flex',
-                flexWrap: 'wrap',
-                gap: '15px',
+                flexDirection: 'column',
+                gap: '12px',
                 width: '100%',
                 maxWidth: '400px',
-                justifyContent: 'center',
+                padding: '12px',
+                borderRadius: '24px',
                 marginTop: '15px',
+                border: '1px solid rgba(255,255,255,0.1)',
+                boxShadow: '0 8px 32px rgba(0,0,0,0.3)'
               }}
             >
-              {/* Color Dock */}
-              <div
-                className='glass-panel color-picker'
-                style={{
-                  display: 'flex',
-                  gap: '10px',
-                  alignItems: 'center',
-                  padding: '10px 16px',
-                  borderRadius: '30px',
-                  overflowX: 'auto',
-                  maxWidth: '100%',
-                  border: '1px solid rgba(255,255,255,0.1)',
-                  boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
-                }}
-              >
+              {/* Row 1: Colors & Eyedropper */}
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', overflowX: 'auto', padding: '4px 2px' }}>
                 {colors.map((c, i) => (
                   <div
                     key={i}
                     style={{
                       backgroundColor: c,
                       flexShrink: 0,
-                      width: '26px',
-                      height: '26px',
-                      border:
-                        color === c
-                          ? '2px solid white'
-                          : '2px solid transparent',
-                      transform: color === c ? 'scale(1.1)' : 'none',
+                      width: '24px',
+                      height: '24px',
+                      border: color === c ? '2px solid white' : '2px solid transparent',
+                      transform: color === c ? 'scale(1.15)' : 'none',
                       transition: 'all 0.2s',
                       cursor: 'pointer',
                       borderRadius: '50%',
                     }}
-                    onClick={() => {
-                      setColor(c);
-                      playClick();
-                    }}
+                    onClick={() => { setColor(c); playClick(); }}
                     onMouseEnter={playHover}
                     title={c}
                   />
                 ))}
-                <div
-                  style={{
-                    width: '1px',
-                    height: '20px',
-                    background: 'rgba(255,255,255,0.2)',
-                    margin: '0 5px',
-                    flexShrink: 0,
-                  }}
-                ></div>
+                <div style={{ width: '1px', height: '20px', background: 'rgba(255,255,255,0.2)', margin: '0 5px', flexShrink: 0 }}></div>
                 <button
                   onMouseEnter={playHover}
                   onClick={() => setIsEyedropper(!isEyedropper)}
                   style={{
-                    width: '28px',
-                    height: '28px',
-                    borderRadius: '50%',
+                    width: '26px', height: '26px', borderRadius: '50%',
                     background: isEyedropper ? 'var(--accent)' : 'transparent',
                     color: isEyedropper ? 'white' : 'var(--text-secondary)',
-                    border: 'none',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    fontSize: '14px',
-                    flexShrink: 0,
-                    transition: 'all 0.2s',
+                    border: '1px solid rgba(255,255,255,0.2)',
+                    cursor: 'pointer', display: 'flex', justifyContent: 'center', alignItems: 'center',
+                    fontSize: '12px', flexShrink: 0, transition: 'all 0.2s',
                   }}
                   title='Pick color from painting'
                 >
@@ -1875,291 +1844,50 @@ function App() {
                 </button>
               </div>
 
-              {/* Sliders Dock */}
-              <div
-                className='glass-panel'
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '10px',
-                  padding: '12px 16px',
-                  borderRadius: '20px',
-                  border: '1px solid rgba(255,255,255,0.1)',
-                  boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
-                  flexGrow: 1,
-                }}
-              >
-                {/* Size Slider */}
-                <div
-                  style={{ display: 'flex', alignItems: 'center', gap: '10px' }}
-                >
-                  <span
-                    style={{
-                      fontSize: '12px',
-                      color: 'var(--text-secondary)',
-                      width: '40px',
-                    }}
-                  >
-                    Size
-                  </span>
-                  <div
-                    style={{
-                      position: 'relative',
-                      flex: 1,
-                      display: 'flex',
-                      alignItems: 'center',
-                    }}
-                  >
-                    <input
-                      type='range'
-                      min='1'
-                      max='50'
-                      value={brushSize}
-                      onChange={(e) => setBrushSize(parseInt(e.target.value))}
-                      onPointerDown={() => setShowBrushPreview(true)}
-                      onPointerUp={() => setShowBrushPreview(false)}
-                      onPointerCancel={() => setShowBrushPreview(false)}
-                      style={{ flex: 1, accentColor: 'var(--accent)' }}
-                    />
-                    {showBrushPreview && (
-                      <div
-                        style={{
-                          position: 'absolute',
-                          top: '-60px',
-                          left: '50%',
-                          transform: 'translateX(-50%)',
-                          width: '60px',
-                          height: '60px',
-                          display: 'flex',
-                          justifyContent: 'center',
-                          alignItems: 'center',
-                          background: 'rgba(15,23,42,0.9)',
-                          borderRadius: '12px',
-                          border: '1px solid rgba(255,255,255,0.2)',
-                          boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-                          zIndex: 100,
-                        }}
-                      >
-                        <div
-                          style={{
-                            width: brushSize,
-                            height: brushSize,
-                            background: color === '#FFFFFF' ? '#ccc' : color,
-                            borderRadius: '50%',
-                          }}
-                        ></div>
-                      </div>
-                    )}
-                  </div>
-                  <span
-                    style={{
-                      fontSize: '12px',
-                      color: 'white',
-                      width: '40px',
-                      textAlign: 'right',
-                    }}
-                  >
-                    {brushSize}px
-                  </span>
+              {/* Row 2: Sliders & Actions */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '20px', alignItems: 'center' }}>
+                {/* Sliders */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1 }}>
+                   {/* Size */}
+                   <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '11px', color: 'var(--text-secondary)', width: '30px' }}>Size</span>
+                      <input type='range' min='1' max='50' value={brushSize} onChange={(e) => setBrushSize(parseInt(e.target.value))} onPointerDown={() => setShowBrushPreview(true)} onPointerUp={() => setShowBrushPreview(false)} onPointerCancel={() => setShowBrushPreview(false)} style={{ flex: 1, accentColor: 'var(--accent)' }} />
+                      <span style={{ fontSize: '11px', color: 'white', width: '32px', textAlign: 'right' }}>{brushSize}px</span>
+                      {showBrushPreview && (
+                         <div style={{ position: 'absolute', top: '-60px', left: '50%', transform: 'translateX(-50%)', width: '60px', height: '60px', display: 'flex', justifyContent: 'center', alignItems: 'center', background: 'rgba(15,23,42,0.9)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.2)', boxShadow: '0 8px 32px rgba(0,0,0,0.5)', zIndex: 100 }}>
+                           <div style={{ width: brushSize, height: brushSize, background: color === '#FFFFFF' ? '#ccc' : color, borderRadius: '50%' }}></div>
+                         </div>
+                      )}
+                   </div>
+                   {/* Alpha */}
+                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '11px', color: 'var(--text-secondary)', width: '30px' }}>Alpha</span>
+                      <input type='range' min='0.05' max='1' step='0.05' value={opacity} onChange={(e) => setOpacity(parseFloat(e.target.value))} style={{ flex: 1, accentColor: 'var(--accent)' }} />
+                      <span style={{ fontSize: '11px', color: 'white', width: '32px', textAlign: 'right' }}>{Math.round(opacity * 100)}%</span>
+                   </div>
+                   {/* Zoom */}
+                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '11px', color: 'var(--text-secondary)', width: '30px' }}>Zoom</span>
+                      <input type='range' min='1' max='3' step='0.1' value={zoom} onChange={(e) => setZoom(parseFloat(e.target.value))} style={{ flex: 1, accentColor: 'var(--accent)' }} />
+                      <span style={{ fontSize: '11px', color: 'white', width: '32px', textAlign: 'right' }}>{Math.round(zoom * 100)}%</span>
+                   </div>
                 </div>
-                {/* Opacity Slider */}
-                <div
-                  style={{ display: 'flex', alignItems: 'center', gap: '10px' }}
-                >
-                  <span
-                    style={{
-                      fontSize: '12px',
-                      color: 'var(--text-secondary)',
-                      width: '40px',
-                    }}
-                  >
-                    Alpha
-                  </span>
-                  <input
-                    type='range'
-                    min='0.05'
-                    max='1'
-                    step='0.05'
-                    value={opacity}
-                    onChange={(e) => setOpacity(parseFloat(e.target.value))}
-                    style={{ flex: 1, accentColor: 'var(--accent)' }}
-                  />
-                  <span
-                    style={{
-                      fontSize: '12px',
-                      color: 'white',
-                      width: '40px',
-                      textAlign: 'right',
-                    }}
-                  >
-                    {Math.round(opacity * 100)}%
-                  </span>
-                </div>
-                {/* Zoom Slider */}
-                <div
-                  style={{ display: 'flex', alignItems: 'center', gap: '10px' }}
-                >
-                  <span
-                    style={{
-                      fontSize: '12px',
-                      color: 'var(--text-secondary)',
-                      width: '40px',
-                    }}
-                  >
-                    Zoom
-                  </span>
-                  <input
-                    type='range'
-                    min='1'
-                    max='3'
-                    step='0.1'
-                    value={zoom}
-                    onChange={(e) => setZoom(parseFloat(e.target.value))}
-                    style={{ flex: 1, accentColor: 'var(--accent)' }}
-                  />
-                  <span
-                    style={{
-                      fontSize: '12px',
-                      color: 'white',
-                      width: '40px',
-                      textAlign: 'right',
-                    }}
-                  >
-                    {Math.round(zoom * 100)}%
-                  </span>
-                </div>
-              </div>
 
-              {/* Action Dock */}
-              <div
-                className='glass-panel'
-                style={{
-                  display: 'flex',
-                  gap: '10px',
-                  alignItems: 'center',
-                  padding: '8px 12px',
-                  borderRadius: '30px',
-                  border: '1px solid rgba(255,255,255,0.1)',
-                  boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
-                }}
-              >
-                <button
-                  onClick={() => setIsEraser(!isEraser)}
-                  style={{
-                    padding: '8px 14px',
-                    background: isEraser
-                      ? 'rgba(255,255,255,0.2)'
-                      : 'transparent',
-                    border: '1px solid rgba(255,255,255,0.2)',
-                    borderRadius: '20px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    color: 'white',
-                    fontSize: '0.9rem',
-                    cursor: 'pointer',
-                    transition: 'background 0.2s',
-                  }}
-                >
-                  🧼 Eraser
-                </button>
-                <button
-                  onClick={() => setIsLineTool(!isLineTool)}
-                  style={{
-                    padding: '8px 14px',
-                    background: isLineTool
-                      ? 'rgba(255,255,255,0.2)'
-                      : 'transparent',
-                    border: '1px solid rgba(255,255,255,0.2)',
-                    borderRadius: '20px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    color: 'white',
-                    fontSize: '0.9rem',
-                    cursor: 'pointer',
-                    transition: 'background 0.2s',
-                  }}
-                >
-                  📏 Line
-                </button>
-                <button
-                  onMouseEnter={playHover}
-                  onClick={() => {
-                    myCanvasRef.current?.undo();
-                    playClick();
-                  }}
-                  style={{
-                    padding: '8px 14px',
-                    background: 'transparent',
-                    border: '1px solid rgba(255,255,255,0.2)',
-                    borderRadius: '20px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    color: 'white',
-                    fontSize: '0.9rem',
-                    cursor: 'pointer',
-                    transition: 'background 0.2s',
-                  }}
-                  onMouseOver={(e) =>
-                    (e.currentTarget.style.background = 'rgba(255,255,255,0.1)')
-                  }
-                  onMouseOut={(e) =>
-                    (e.currentTarget.style.background = 'transparent')
-                  }
-                >
-                  <svg
-                    width='14'
-                    height='14'
-                    viewBox='0 0 24 24'
-                    fill='none'
-                    stroke='currentColor'
-                    strokeWidth='2.5'
-                    strokeLinecap='round'
-                    strokeLinejoin='round'
-                  >
-                    <path d='M3 7v6h6' />
-                    <path d='M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13' />
-                  </svg>
-                  Undo
-                </button>
-                <button
-                  onMouseEnter={playHover}
-                  onClick={() => {
-                    myCanvasRef.current?.clear();
-                    playClick();
-                    triggerShake();
-                  }}
-                  style={{
-                    padding: '8px 14px',
-                    background: 'linear-gradient(135deg, #ef4444, #dc2626)',
-                    border: 'none',
-                    borderRadius: '20px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    color: 'white',
-                    fontSize: '0.9rem',
-                    cursor: 'pointer',
-                    boxShadow: '0 4px 10px rgba(239,68,68,0.3)',
-                  }}
-                >
-                  <svg
-                    width='14'
-                    height='14'
-                    viewBox='0 0 24 24'
-                    fill='none'
-                    stroke='currentColor'
-                    strokeWidth='2.5'
-                    strokeLinecap='round'
-                    strokeLinejoin='round'
-                  >
-                    <path d='M3 6h18' />
-                    <path d='M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2' />
-                  </svg>
-                  Clear
-                </button>
+                {/* Actions */}
+                <div style={{ display: 'grid', gridTemplateColumns: '40px 40px', gap: '8px' }}>
+                   <button title="Eraser" onMouseEnter={playHover} onClick={() => setIsEraser(!isEraser)} style={{ width: '40px', height: '40px', background: isEraser ? 'var(--accent)' : 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', color: 'white', display: 'flex', justifyContent: 'center', alignItems: 'center', cursor: 'pointer', transition: 'all 0.2s' }}>
+                      <svg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'><path d='m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21'/><path d='M22 21H7'/><path d='m5 11 9 9'/></svg>
+                   </button>
+                   <button title="Line Tool" onMouseEnter={playHover} onClick={() => setIsLineTool(!isLineTool)} style={{ width: '40px', height: '40px', background: isLineTool ? 'var(--accent)' : 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', color: 'white', display: 'flex', justifyContent: 'center', alignItems: 'center', cursor: 'pointer', transition: 'all 0.2s' }}>
+                      <svg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'><path d='M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.41 2.41 0 0 1 0-3.4l2.6-2.6a2.41 2.41 0 0 1 3.4 0Z'/><path d='m14.5 12.5 2-2'/><path d='m11.5 9.5 2-2'/><path d='m8.5 6.5 2-2'/><path d='m17.5 15.5 2-2'/></svg>
+                   </button>
+                   <button title="Undo" onMouseEnter={playHover} onClick={() => { myCanvasRef.current?.undo(); playClick(); }} style={{ width: '40px', height: '40px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', color: 'white', display: 'flex', justifyContent: 'center', alignItems: 'center', cursor: 'pointer', transition: 'all 0.2s' }}>
+                      <svg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'><path d='M3 7v6h6'/><path d='M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13'/></svg>
+                   </button>
+                   <button title="Clear" onMouseEnter={playHover} onClick={() => { myCanvasRef.current?.clear(); playClick(); triggerShake(); }} style={{ width: '40px', height: '40px', background: 'linear-gradient(135deg, #ef4444, #dc2626)', border: 'none', borderRadius: '12px', color: 'white', display: 'flex', justifyContent: 'center', alignItems: 'center', cursor: 'pointer', transition: 'all 0.2s', boxShadow: '0 4px 10px rgba(239,68,68,0.3)' }}>
+                      <svg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'><path d='M3 6h18'/><path d='M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2'/></svg>
+                   </button>
+                </div>
               </div>
             </div>
           )}
