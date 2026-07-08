@@ -6,6 +6,7 @@ const path = require('path');
 
 const app = express();
 app.use(cors());
+app.use(express.json({ limit: '10mb' }));
 
 const imageCache = {};
 
@@ -52,6 +53,37 @@ app.get('/api/proxy-image', async (req, res) => {
 // Serve static files from the React frontend build
 app.use(express.static(path.join(__dirname, '../client/dist')));
 
+const customImages = {}; // custom images storage
+
+app.post('/api/upload-image', (req, res) => {
+    const { image } = req.body;
+    if (!image) return res.status(400).send('No image provided');
+    const id = Math.random().toString(36).substring(2, 10);
+    customImages[id] = image; // Data URI format
+    setTimeout(() => { delete customImages[id]; }, 2 * 60 * 60 * 1000); // Clean up after 2 hours
+    res.json({ id });
+});
+
+app.get('/api/custom-image/:id', (req, res) => {
+    const id = req.params.id;
+    if (!customImages[id]) return res.status(404).send('Image not found');
+    
+    const match = customImages[id].match(/^data:(image\/\w+);base64,(.*)$/);
+    if (!match) return res.status(400).send('Invalid image format');
+    
+    const contentType = match[1];
+    const base64Data = match[2];
+    const buffer = Buffer.from(base64Data, 'base64');
+    
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.send(buffer);
+});
+
+app.get('/api/ping', (req, res) => {
+    res.send('pong');
+});
+
 // Catch-all route to serve index.html for React Router (if used) and direct navigation
 app.use((req, res) => {
   res.sendFile(path.join(__dirname, '../client/dist/index.html'));
@@ -71,7 +103,7 @@ const rooms = {};
 io.on('connection', (socket) => {
   console.log('A user connected:', socket.id);
 
-  socket.on('joinRoom', ({ roomId, imageSrc }) => {
+  socket.on('joinRoom', ({ roomId, imageSrc, category }) => {
     socket.join(roomId);
     
     if (!rooms[roomId]) {
@@ -79,6 +111,7 @@ io.on('connection', (socket) => {
         players: [],
         gameStarted: false,
         referenceImage: imageSrc || `/reference_${Math.floor(Math.random() * 4) + 1}.png`,
+        category: category || 'shapes',
         strokes: [], // Store all strokes for robust syncing
         scores: {},   // Store latest scores
         endTime: null,
@@ -114,7 +147,7 @@ io.on('connection', (socket) => {
         setTimeout(() => {
             if (rooms[roomId] && rooms[roomId].players.length === 2 && !rooms[roomId].gameStarted) {
                 rooms[roomId].gameStarted = true;
-                const endTime = Date.now() + 60000; // 60 seconds
+                const endTime = Date.now() + 180000; // 3 minutes
                 rooms[roomId].endTime = endTime;
                 io.to(roomId).emit('gameStarted', { endTime });
                 
@@ -200,13 +233,18 @@ io.on('connection', (socket) => {
                 rooms[roomId].scores = {};
                 
                 // Generate a new dynamic AI image for the rematch as an SVG for infinite vector resolution
-                const randomSeed = Math.random().toString(36).substring(7);
-                const imageSrc = `https://api.dicebear.com/7.x/shapes/svg?seed=${randomSeed}&backgroundColor=0a0a0a,1a1a1a&shape1Color=ff0000,00ff00,0000ff,ffff00,00ffff,ff00ff&shape2Color=ff0000,00ff00,0000ff,ffff00,00ffff,ff00ff&shape3Color=ff0000,00ff00,0000ff,ffff00,00ffff,ff00ff`;
-                rooms[roomId].referenceImage = `/api/proxy-image?url=${encodeURIComponent(imageSrc)}`;
+                if (rooms[roomId].category === 'custom') {
+                    // Retain the custom image for the rematch
+                } else {
+                    const randomSeed = Math.random().toString(36).substring(7);
+                    const style = rooms[roomId].category || 'shapes';
+                    const imageSrc = `https://api.dicebear.com/7.x/${style}/svg?seed=${randomSeed}&backgroundColor=0a0a0a,1a1a1a,e2e8f0,f8fafc,fef08a,fbcfe8,bfdbfe`;
+                    rooms[roomId].referenceImage = `/api/proxy-image?url=${encodeURIComponent(imageSrc)}`;
+                }
                 
                 // Start the game!
                 rooms[roomId].gameStarted = true;
-                const endTime = Date.now() + 60000; // 60 seconds
+                const endTime = Date.now() + 180000; // 3 minutes
                 rooms[roomId].endTime = endTime;
                 
                 io.to(roomId).emit('restartMatch', { 
