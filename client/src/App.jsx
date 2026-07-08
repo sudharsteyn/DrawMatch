@@ -86,6 +86,58 @@ const Canvas = forwardRef(({ isPlayer, color, brushSize, socket, roomId, onScore
     remoteClear: () => {
        strokesHistory.current = [];
        redrawCanvas([]);
+    },
+    playReplay: () => {
+       return new Promise(resolve => {
+           const strokes = [...strokesHistory.current];
+           redrawCanvas([]);
+           if (strokes.length === 0) return resolve();
+           
+           const framesTarget = 300; 
+           const strokesPerFrame = Math.max(1, Math.ceil(strokes.length / framesTarget));
+           let currentIndex = 0;
+           
+           const drawFrame = () => {
+               const endIndex = Math.min(currentIndex + strokesPerFrame, strokes.length);
+               const currentBatch = strokes.slice(currentIndex, endIndex);
+               
+               const canvas = canvasRef.current;
+               if (!canvas) return resolve();
+               const ctx = canvas.getContext('2d');
+               
+               const paths = {};
+               const pathOrder = [];
+               currentBatch.forEach(s => {
+                   if (!paths[s.strokeId]) {
+                       paths[s.strokeId] = { color: s.color, size: s.size, points: [{x: s.startX, y: s.startY}] };
+                       pathOrder.push(s.strokeId);
+                   }
+                   paths[s.strokeId].points.push({x: s.endX, y: s.endY});
+               });
+               
+               pathOrder.forEach(id => {
+                   const p = paths[id];
+                   ctx.beginPath();
+                   ctx.moveTo(p.points[0].x, p.points[0].y);
+                   for (let i = 1; i < p.points.length; i++) {
+                       ctx.lineTo(p.points[i].x, p.points[i].y);
+                   }
+                   ctx.strokeStyle = p.color;
+                   ctx.lineWidth = p.size;
+                   ctx.lineCap = 'round';
+                   ctx.lineJoin = 'round';
+                   ctx.stroke();
+               });
+               
+               currentIndex = endIndex;
+               if (currentIndex < strokes.length) {
+                   requestAnimationFrame(drawFrame);
+               } else {
+                   resolve();
+               }
+           };
+           requestAnimationFrame(drawFrame);
+       });
     }
   }));
 
@@ -230,7 +282,7 @@ function App() {
   
   const [myScore, setMyScore] = useState(0);
   const [opponentScore, setOpponentScore] = useState(0);
-  const [timeLeft, setTimeLeft] = useState(180);
+  const [timeLeft, setTimeLeft] = useState(parseInt(import.meta.env.VITE_MATCH_DURATION_SECONDS || 180));
   const [endTime, setEndTime] = useState(null);
   const [myDiffUrl, setMyDiffUrl] = useState(null);
   const [oppDiffUrl, setOppDiffUrl] = useState(null);
@@ -238,6 +290,7 @@ function App() {
   const [opponentDisconnected, setOpponentDisconnected] = useState(false);
   const [rematchStatus, setRematchStatus] = useState('');
   const [copied, setCopied] = useState(false);
+  const [isReplaying, setIsReplaying] = useState(false);
 
   const copyRoomCode = () => {
       navigator.clipboard.writeText(roomId);
@@ -287,7 +340,8 @@ function App() {
 
   useEffect(() => {
     // Connect to local server during development, or the current host in production
-    const newSocket = import.meta.env.PROD ? io() : io('http://localhost:3001');
+    const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+    const newSocket = import.meta.env.PROD ? io() : io(backendUrl);
     setSocket(newSocket);
     
     newSocket.on('connect', () => {
@@ -478,7 +532,8 @@ function App() {
         }
     } else {
         const seed = Math.random().toString(36).substring(2, 10);
-        const aiImageUrl = `https://api.dicebear.com/7.x/${gameCategory}/svg?seed=${seed}&backgroundColor=e2e8f0,f8fafc,fef08a,fbcfe8,bfdbfe`;
+        const dicebearBase = import.meta.env.VITE_DICEBEAR_API_URL || 'https://api.dicebear.com/7.x';
+        const aiImageUrl = `${dicebearBase}/${gameCategory}/svg?seed=${seed}&backgroundColor=e2e8f0,f8fafc,fef08a,fbcfe8,bfdbfe`;
         finalImageUrl = `/api/proxy-image?url=${encodeURIComponent(aiImageUrl)}`;
     }
     
@@ -603,7 +658,8 @@ function App() {
           <p style={{ marginBottom: '30px', color: 'var(--text-secondary)' }}>Can you copy the masterpiece?</p>
           
           <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-            <div style={{ display: 'flex', gap: '10px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                <label style={{ textAlign: 'left', color: 'var(--text-secondary)', fontSize: '0.9rem', marginLeft: '5px' }}>What should we draw?</label>
                 <select 
                     value={gameCategory} 
                     onChange={(e) => setGameCategory(e.target.value)}
@@ -611,15 +667,19 @@ function App() {
                 >
                     <option value="shapes" style={{color: 'black'}}>Abstract Shapes</option>
                     <option value="pixel-art" style={{color: 'black'}}>Pixel Art</option>
+                    <option value="icons" style={{color: 'black'}}>Icons (Beginner)</option>
+                    <option value="fun-emoji" style={{color: 'black'}}>Fun Emoji</option>
                     <option value="avataaars" style={{color: 'black'}}>Avatars</option>
                     <option value="bottts" style={{color: 'black'}}>Robots</option>
                     <option value="adventurer" style={{color: 'black'}}>Adventurer</option>
                     <option value="croodles" style={{color: 'black'}}>Croodles</option>
                     <option value="identicon" style={{color: 'black'}}>Identicons</option>
+                    <option value="rings" style={{color: 'black'}}>Rings & Geometry</option>
                     <option value="micah" style={{color: 'black'}}>Micah</option>
                     <option value="miniavs" style={{color: 'black'}}>Mini Avatars</option>
                     <option value="open-peeps" style={{color: 'black'}}>Open Peeps</option>
                     <option value="personas" style={{color: 'black'}}>Personas</option>
+                    <option value="lorelei" style={{color: 'black'}}>Lorelei (Advanced)</option>
                     <option value="custom" style={{color: 'black'}}>Upload Custom Image</option>
                 </select>
             </div>
@@ -701,6 +761,27 @@ function App() {
                             }}
                         >
                             {rematchStatus === 'waiting' ? 'Waiting for opponent...' : 'Play Again'}
+                        </button>
+                        <button 
+                            className="btn" 
+                            onClick={async () => {
+                                setIsReplaying(true);
+                                await Promise.all([
+                                    myCanvasRef.current?.playReplay(),
+                                    oppCanvasRef.current?.playReplay()
+                                ]);
+                                setIsReplaying(false);
+                            }}
+                            disabled={isReplaying}
+                            style={{ 
+                                padding: '10px 40px', fontSize: '1.2rem', borderRadius: '30px', 
+                                background: 'transparent', border: '1px solid rgba(255,255,255,0.3)',
+                                color: 'white', cursor: isReplaying ? 'not-allowed' : 'pointer'
+                            }}
+                            onMouseOver={e => e.currentTarget.style.background='rgba(255,255,255,0.1)'} 
+                            onMouseOut={e => e.currentTarget.style.background='transparent'}
+                        >
+                            {isReplaying ? 'Replaying...' : 'Watch Replay ⏪'}
                         </button>
                         
                         <button 
@@ -830,7 +911,7 @@ function App() {
                    </div>
                 </div>
               )}
-              {gameStatus === 'finished' && myDiffUrl && (
+              {gameStatus === 'finished' && myDiffUrl && !isReplaying && (
                   <img src={myDiffUrl} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 20, animation: 'fadeIn 1s ease 0.5s forwards', opacity: 0 }} alt="Error Highlight" />
               )}
             </div>
@@ -968,7 +1049,7 @@ function App() {
              </>
           )}
           <div className="responsive-canvas-wrapper">
-             {gameStatus === 'finished' && oppDiffUrl && (
+             {gameStatus === 'finished' && oppDiffUrl && !isReplaying && (
                 <img src={oppDiffUrl} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 20, animation: 'fadeIn 1s ease 0.5s forwards', opacity: 0 }} alt="Error Highlight" />
              )}
             <Canvas 
