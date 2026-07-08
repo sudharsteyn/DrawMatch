@@ -16,12 +16,26 @@ const Canvas = forwardRef(({ isPlayer, color, brushSize, socket, roomId, onScore
     const ctx = canvas.getContext('2d');
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    strokes.forEach(stroke => {
+    // Group segments by strokeId to prevent alpha overlapping
+    const paths = {};
+    const pathOrder = [];
+    strokes.forEach(s => {
+      if (!paths[s.strokeId]) {
+        paths[s.strokeId] = { color: s.color, size: s.size, points: [{x: s.startX, y: s.startY}] };
+        pathOrder.push(s.strokeId);
+      }
+      paths[s.strokeId].points.push({x: s.endX, y: s.endY});
+    });
+
+    pathOrder.forEach(id => {
+      const p = paths[id];
       ctx.beginPath();
-      ctx.moveTo(stroke.startX, stroke.startY);
-      ctx.lineTo(stroke.endX, stroke.endY);
-      ctx.strokeStyle = stroke.color;
-      ctx.lineWidth = stroke.size;
+      ctx.moveTo(p.points[0].x, p.points[0].y);
+      for (let i = 1; i < p.points.length; i++) {
+        ctx.lineTo(p.points[i].x, p.points[i].y);
+      }
+      ctx.strokeStyle = p.color;
+      ctx.lineWidth = p.size;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       ctx.stroke();
@@ -51,15 +65,7 @@ const Canvas = forwardRef(({ isPlayer, color, brushSize, socket, roomId, onScore
     },
     addExternalStroke: (stroke) => {
        strokesHistory.current.push(stroke);
-       const ctx = canvasRef.current.getContext('2d');
-       ctx.beginPath();
-       ctx.moveTo(stroke.startX, stroke.startY);
-       ctx.lineTo(stroke.endX, stroke.endY);
-       ctx.strokeStyle = stroke.color;
-       ctx.lineWidth = stroke.size;
-       ctx.lineCap = 'round';
-       ctx.lineJoin = 'round';
-       ctx.stroke();
+       redrawCanvas(strokesHistory.current);
     },
     setInitialStrokes: (strokes) => {
        strokesHistory.current = strokes;
@@ -84,39 +90,42 @@ const Canvas = forwardRef(({ isPlayer, color, brushSize, socket, roomId, onScore
     redrawCanvas([]);
   }, []);
 
+  const getCoordinates = (e) => {
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return {
+        x: (e.clientX - rect.left) * scaleX,
+        y: (e.clientY - rect.top) * scaleY
+    };
+  };
+
   const startDrawing = (e) => {
     if (!isPlayer) return;
     e.target.setPointerCapture(e.pointerId);
-    const { offsetX, offsetY } = e.nativeEvent;
-    lastPos.current = { x: offsetX, y: offsetY };
+    const { x, y } = getCoordinates(e);
+    lastPos.current = { x, y };
     currentStrokeId.current = Math.random().toString(36).substr(2, 9);
     setIsDrawing(true);
   };
 
   const draw = (e) => {
     if (!isDrawing || !isPlayer) return;
-    const { offsetX, offsetY } = e.nativeEvent;
-    const ctx = canvasRef.current.getContext('2d');
-    
-    ctx.beginPath();
-    ctx.moveTo(lastPos.current.x, lastPos.current.y);
-    ctx.lineTo(offsetX, offsetY);
-    ctx.strokeStyle = color;
-    ctx.lineWidth = brushSize;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.stroke();
+    const { x: currentX, y: currentY } = getCoordinates(e);
+    // Removed manual tiny-segment stroking to prevent alpha dotting
 
     const strokeObj = {
         strokeId: currentStrokeId.current,
         startX: lastPos.current.x,
         startY: lastPos.current.y,
-        endX: offsetX,
-        endY: offsetY,
+        endX: currentX,
+        endY: currentY,
         color,
         size: brushSize
     };
     strokesHistory.current.push(strokeObj);
+    redrawCanvas(strokesHistory.current);
 
     if (socket && roomId) {
       socket.emit('drawData', {
@@ -125,7 +134,7 @@ const Canvas = forwardRef(({ isPlayer, color, brushSize, socket, roomId, onScore
       });
     }
 
-    lastPos.current = { x: offsetX, y: offsetY };
+    lastPos.current = { x: currentX, y: currentY };
   };
 
   const endDrawing = (e) => {
@@ -165,9 +174,12 @@ function App() {
   const [inGame, setInGame] = useState(false);
   const [gameStatus, setGameStatus] = useState('lobby'); // lobby, playing, finished
   const [color, setColor] = useState('#000000');
+  const [opacity, setOpacity] = useState(1);
   const [brushSize, setBrushSize] = useState(10);
+  const [isEraser, setIsEraser] = useState(false);
   const [showGrid, setShowGrid] = useState(false);
   const [isEyedropper, setIsEyedropper] = useState(false);
+  const [zoom, setZoom] = useState(1);
   const [currentImage, setCurrentImage] = useState('/reference_2.png');
   const [isImageLoading, setIsImageLoading] = useState(true);
   const [baselineScore, setBaselineScore] = useState(0);
@@ -180,14 +192,55 @@ function App() {
   const [myDiffUrl, setMyDiffUrl] = useState(null);
   const [oppDiffUrl, setOppDiffUrl] = useState(null);
   const [opponentLeft, setOpponentLeft] = useState(false);
+  const [opponentDisconnected, setOpponentDisconnected] = useState(false);
+  const [rematchStatus, setRematchStatus] = useState('');
+  const [copied, setCopied] = useState(false);
+
+  const copyRoomCode = () => {
+      navigator.clipboard.writeText(roomId);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+  };
   
   const referenceImgRef = useRef(null);
   const referenceCanvasRef = useRef(null); 
   const myCanvasRef = useRef(null);
   const oppCanvasRef = useRef(null);
+  const canvasScrollRef = useRef(null);
+  const refScrollRef = useRef(null);
+
+  const handleCanvasScroll = (e) => {
+      if (refScrollRef.current) {
+          if (refScrollRef.current.scrollTop !== e.target.scrollTop) refScrollRef.current.scrollTop = e.target.scrollTop;
+          if (refScrollRef.current.scrollLeft !== e.target.scrollLeft) refScrollRef.current.scrollLeft = e.target.scrollLeft;
+      }
+  };
+
+  const handleRefScroll = (e) => {
+      if (canvasScrollRef.current) {
+          if (canvasScrollRef.current.scrollTop !== e.target.scrollTop) canvasScrollRef.current.scrollTop = e.target.scrollTop;
+          if (canvasScrollRef.current.scrollLeft !== e.target.scrollLeft) canvasScrollRef.current.scrollLeft = e.target.scrollLeft;
+      }
+  };
 
   // Dynamic colors array starting with basics, populated on image load
   const [colors, setColors] = useState(['#000000', '#FFFFFF']);
+
+  const hexToRgba = (hex, alpha) => {
+      if (hex.startsWith('rgba')) return hex;
+      if (!/^#([0-9A-F]{3}){1,2}$/i.test(hex)) return `rgba(0,0,0,${alpha})`;
+      let r = 0, g = 0, b = 0;
+      if (hex.length === 4) {
+          r = parseInt(hex[1] + hex[1], 16);
+          g = parseInt(hex[2] + hex[2], 16);
+          b = parseInt(hex[3] + hex[3], 16);
+      } else if (hex.length === 7) {
+          r = parseInt(hex.slice(1, 3), 16);
+          g = parseInt(hex.slice(3, 5), 16);
+          b = parseInt(hex.slice(5, 7), 16);
+      }
+      return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  };
 
   useEffect(() => {
     // Connect to local server during development, or the current host in production
@@ -274,20 +327,47 @@ function App() {
         setOpponentScore(score);
     });
 
-    newSocket.on('opponentLeft', () => {
-        setGameStatus('finished');
-        setOpponentLeft(true);
+    newSocket.on('waitingForRematch', () => setRematchStatus('waiting'));
+    newSocket.on('opponentWantsRematch', () => setRematchStatus('opponent_waiting'));
+
+    newSocket.on('restartMatch', ({ referenceImage, endTime }) => {
+        setRematchStatus('');
+        setCurrentImage(referenceImage);
+        setIsImageLoading(true);
+        setMyScore(0);
         setOpponentScore(0);
-        setTimeLeft(0);
-        setEndTime(null);
+        setMyDiffUrl(null);
+        setOppDiffUrl(null);
+        setOpponentLeft(false);
+        setOpponentDisconnected(false);
+        setEndTime(endTime);
+        setZoom(1);
+        setShowGrid(false);
+        setGameStatus('playing');
         
-        // Generate diff just for the local player since opponent left
-        setTimeout(() => {
-            if (referenceCanvasRef.current && myCanvasRef.current) {
-                const myDiff = generateDiffOverlay(myCanvasRef.current.getCanvas(), referenceCanvasRef.current);
-                if (myDiff) setMyDiffUrl(myDiff);
-            }
-        }, 100);
+        if (myCanvasRef.current) myCanvasRef.current.remoteClear();
+        if (oppCanvasRef.current) oppCanvasRef.current.remoteClear();
+    });
+
+    newSocket.on('opponentLeft', ({ forfeited }) => {
+        if (forfeited) {
+            setGameStatus('finished');
+            setOpponentLeft(true);
+            setOpponentScore(0);
+            setTimeLeft(0);
+            setEndTime(null);
+            
+            // Generate diff just for the local player since opponent left
+            setTimeout(() => {
+                if (referenceCanvasRef.current && myCanvasRef.current) {
+                    const myDiff = generateDiffOverlay(myCanvasRef.current.getCanvas(), referenceCanvasRef.current);
+                    if (myDiff) setMyDiffUrl(myDiff);
+                }
+            }, 100);
+        } else {
+            // Game already ended, opponent just left the lobby
+            setOpponentDisconnected(true);
+        }
     });
 
     return () => newSocket.close();
@@ -314,11 +394,11 @@ function App() {
     const randomStyle = styles[Math.floor(Math.random() * styles.length)];
     const seed = Math.random().toString(36).substring(2, 10);
     
-    // Generate a beautiful avatar/shape directly via the free, reliable DiceBear API
-    const aiImageUrl = `https://api.dicebear.com/7.x/${randomStyle}/png?seed=${seed}&backgroundColor=e2e8f0,f8fafc,fef08a,fbcfe8,bfdbfe&size=400`;
+    // Generate a beautiful avatar/shape directly via the free, reliable DiceBear API as an SVG for infinite resolution
+    const aiImageUrl = `https://api.dicebear.com/7.x/${randomStyle}/svg?seed=${seed}&backgroundColor=e2e8f0,f8fafc,fef08a,fbcfe8,bfdbfe`;
     
     setRoomId(room);
-    setCurrentImage(aiImageUrl);
+    setCurrentImage(`/api/proxy-image?url=${encodeURIComponent(aiImageUrl)}`);
     setIsImageLoading(true);
     setInGame(true);
     setGameStatus('waiting');
@@ -349,6 +429,8 @@ function App() {
       }
   }, [inGame, socket, roomId]);
 
+  const displayZoom = gameStatus === 'finished' ? 1 : zoom;
+
   const handleImageLoad = () => {
     const img = referenceImgRef.current;
     if (img && referenceCanvasRef.current) {
@@ -375,10 +457,15 @@ function App() {
   };
 
   const handleImageError = () => {
-     // If the API fails, randomly fallback to one of our 10 beautifully curated default images
-     console.warn('Failed to load AI image. Falling back to default.');
-     const randomFallbackIndex = Math.floor(Math.random() * 10) + 1;
-     setCurrentImage(`/reference_${randomFallbackIndex}.png`);
+     // If the API fails, randomly fallback to one of our 10 beautifully curated default images, deterministically chosen by roomId so both players see the same image
+     console.warn('Failed to load AI image. Falling back to deterministic default based on room ID.');
+     let hash = 0;
+     const idToHash = roomId || 'default';
+     for (let i = 0; i < idToHash.length; i++) {
+         hash = idToHash.charCodeAt(i) + ((hash << 5) - hash);
+     }
+     const index = (Math.abs(hash) % 10) + 1;
+     setCurrentImage(`/reference_${index}.png`);
   };
 
   const handleReferenceClick = (e) => {
@@ -402,6 +489,7 @@ function App() {
     
     setColor(hex);
     setIsEyedropper(false);
+    setIsEraser(false);
     
     if (!colors.includes(hex)) {
        setColors(prev => [...prev, hex]);
@@ -470,16 +558,63 @@ function App() {
         {gameStatus === 'finished' ? (
            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', animation: 'fadeIn 0.5s ease' }}>
               <h2 style={{ fontSize: '2.5rem', color: '#cbd5e1', letterSpacing: '10px', fontWeight: '300', margin: '20px 0 10px 0', textTransform: 'uppercase' }}>{opponentLeft ? 'Opponent Forfeited' : "Time's Up"}</h2>
-              <button className="btn" onClick={() => window.location.reload()} style={{ padding: '10px 40px', fontSize: '1.2rem', borderRadius: '30px', background: 'var(--success)' }}>Play Again</button>
+              {(!opponentLeft && !opponentDisconnected) ? (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
+                    {rematchStatus === 'opponent_waiting' && (
+                        <div style={{ color: 'var(--accent)', fontWeight: 'bold', animation: 'pulse 2s infinite' }}>Opponent wants a rematch!</div>
+                    )}
+                    <div style={{ display: 'flex', gap: '15px' }}>
+                        <button 
+                            className="btn" 
+                            onClick={() => {
+                                if (rematchStatus !== 'waiting') socket.emit('playAgain', { roomId });
+                            }} 
+                            disabled={rematchStatus === 'waiting'}
+                            style={{ 
+                                padding: '10px 40px', fontSize: '1.2rem', borderRadius: '30px', 
+                                background: rematchStatus === 'waiting' ? 'rgba(255,255,255,0.2)' : 'var(--success)',
+                                cursor: rematchStatus === 'waiting' ? 'not-allowed' : 'pointer'
+                            }}
+                        >
+                            {rematchStatus === 'waiting' ? 'Waiting for opponent...' : 'Play Again'}
+                        </button>
+                        
+                        <button 
+                            className="btn" 
+                            onClick={() => window.location.reload()}
+                            style={{ 
+                                padding: '10px 40px', fontSize: '1.2rem', borderRadius: '30px', 
+                                background: 'transparent', border: '1px solid rgba(255,255,255,0.3)',
+                                color: 'white', cursor: 'pointer'
+                            }}
+                            onMouseOver={e => e.currentTarget.style.background='rgba(255,255,255,0.1)'} 
+                            onMouseOut={e => e.currentTarget.style.background='transparent'}
+                        >
+                            Leave Room
+                        </button>
+                    </div>
+                </div>
+              ) : (
+                <button className="btn" onClick={() => window.location.reload()} style={{ padding: '10px 40px', fontSize: '1.2rem', borderRadius: '30px', background: 'var(--accent)' }}>Back to Lobby</button>
+              )}
            </div>
         ) : (
            <>
              <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
                 <img src="/logo.png" alt="DrawMatch Logo" style={{ width: '45px', height: '45px', borderRadius: '10px' }} />
-                <div>
-                  <h1 style={{ margin: 0 }}>DrawMatch</h1>
-                  <p style={{ margin: 0, opacity: 0.8 }}>Room: {roomId}</p>
-                </div>
+                 <div>
+                   <h1 style={{ margin: 0 }}>DrawMatch</h1>
+                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', opacity: 0.8, marginTop: '2px' }}>
+                     <p style={{ margin: 0 }}>Room: {roomId}</p>
+                     <button onClick={copyRoomCode} style={{ background: 'transparent', border: 'none', color: 'white', cursor: 'pointer', padding: '2px' }} title="Copy Room Code">
+                        {copied ? (
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                        ) : (
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                        )}
+                     </button>
+                   </div>
+                 </div>
              </div>
              <div style={{ fontSize: '2rem', fontWeight: 'bold', color: timeLeft <= 10 ? 'var(--danger)' : 'white' }}>
                 {endTime ? formatTime(timeLeft) : 'Waiting...'}
@@ -533,29 +668,47 @@ function App() {
                </div>
              </>
           )}
-          <div className="canvas-wrapper" style={{ width: 400, height: 300, position: 'relative' }}>
-            <Canvas 
-                ref={myCanvasRef}
-                isPlayer={gameStatus === 'playing'} 
-                color={color} 
-                brushSize={brushSize} 
-                socket={socket} 
-                roomId={roomId}
-                onScoreUpdate={updateMyScore}
-                referenceCanvasRef={referenceCanvasRef}
-                showGrid={showGrid}
-                baselineScore={baselineScore}
-            />
-            {gameStatus === 'waiting' && (
-              <div style={{ position: 'absolute', inset: 0, background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(3px)', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', zIndex: 10 }}>
-                 <div style={{ width: '45px', height: '45px', border: '4px solid rgba(255,255,255,0.1)', borderTopColor: '#60a5fa', borderRadius: '50%', animation: 'spin 1s linear infinite', marginBottom: '15px' }}></div>
-                 <h3 style={{ color: 'white', textShadow: '0 2px 4px rgba(0,0,0,0.5)', marginBottom: '8px', fontSize: '1.3rem' }}>Waiting for Opponent...</h3>
-                 <p style={{ color: 'var(--text-secondary)', fontSize: '1rem' }}>Room Code: <strong style={{color: 'white', background: 'rgba(255,255,255,0.15)', padding: '3px 8px', borderRadius: '6px', letterSpacing: '1px'}}>{roomId}</strong></p>
-              </div>
-            )}
-            {gameStatus === 'finished' && myDiffUrl && (
-                <img src={myDiffUrl} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 20, animation: 'fadeIn 1s ease 0.5s forwards', opacity: 0 }} alt="Error Highlight" />
-            )}
+          <div ref={canvasScrollRef} onScroll={handleCanvasScroll} style={{ width: '100%', maxWidth: '400px', maxHeight: '300px', overflow: 'auto', position: 'relative', scrollbarWidth: 'thin' }}>
+            <div className="responsive-canvas-wrapper" style={{ width: `${displayZoom * 100}%`, maxWidth: 'none', transformOrigin: 'top left' }}>
+              <Canvas 
+                  ref={myCanvasRef}
+                  isPlayer={gameStatus === 'playing'} 
+                  color={isEraser ? 'rgba(255,255,255,1)' : hexToRgba(color, opacity)} 
+                  brushSize={brushSize} 
+                  socket={socket} 
+                  roomId={roomId}
+                  onScoreUpdate={updateMyScore}
+                  referenceCanvasRef={referenceCanvasRef}
+                  showGrid={showGrid && gameStatus !== 'finished'}
+                  baselineScore={baselineScore}
+              />
+              {gameStatus === 'waiting' && (
+                <div style={{ position: 'absolute', inset: 0, background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(3px)', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', zIndex: 10 }}>
+                   <div style={{ width: '45px', height: '45px', border: '4px solid rgba(255,255,255,0.1)', borderTopColor: '#60a5fa', borderRadius: '50%', animation: 'spin 1s linear infinite', marginBottom: '15px' }}></div>
+                   <h3 style={{ color: 'white', textShadow: '0 2px 4px rgba(0,0,0,0.5)', marginBottom: '8px', fontSize: '1.3rem' }}>Waiting for Opponent...</h3>
+                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--text-secondary)', fontSize: '1rem' }}>
+                      <span>Room Code:</span> 
+                      <strong style={{color: 'white', background: 'rgba(255,255,255,0.15)', padding: '3px 8px', borderRadius: '6px', letterSpacing: '1px'}}>{roomId}</strong>
+                      <button 
+                          onClick={copyRoomCode} 
+                          style={{ background: 'rgba(255,255,255,0.1)', border: 'none', color: copied ? '#10b981' : 'white', cursor: 'pointer', padding: '6px', borderRadius: '6px', display: 'flex', alignItems: 'center', transition: 'all 0.2s' }}
+                          onMouseOver={e => e.currentTarget.style.background='rgba(255,255,255,0.2)'}
+                          onMouseOut={e => e.currentTarget.style.background='rgba(255,255,255,0.1)'}
+                          title="Copy Room Code"
+                      >
+                          {copied ? (
+                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                          ) : (
+                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                          )}
+                      </button>
+                   </div>
+                </div>
+              )}
+              {gameStatus === 'finished' && myDiffUrl && (
+                  <img src={myDiffUrl} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 20, animation: 'fadeIn 1s ease 0.5s forwards', opacity: 0 }} alt="Error Highlight" />
+              )}
+            </div>
           </div>
           
           {gameStatus !== 'finished' && (
@@ -588,26 +741,47 @@ function App() {
               </button>
             </div>
             
-            {/* Brush Dock */}
-            <div className="glass-panel" style={{ display: 'flex', gap: '8px', alignItems: 'center', padding: '8px 16px', borderRadius: '30px', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
-                {[5, 15, 30].map(size => (
-                  <button 
-                    key={size}
-                    onClick={() => setBrushSize(size)}
-                    style={{ 
-                        width: '32px', height: '32px', borderRadius: '50%', border: 'none',
-                        background: brushSize === size ? 'rgba(255,255,255,0.1)' : 'transparent',
-                        display: 'flex', justifyContent: 'center', alignItems: 'center',
-                        cursor: 'pointer', transition: 'background 0.2s'
-                    }}
-                  >
-                    <div style={{ width: size, height: size, background: color === '#FFFFFF' ? '#000' : color, borderRadius: '50%' }}></div>
-                  </button>
-                ))}
+            {/* Sliders Dock */}
+            <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '10px', padding: '12px 16px', borderRadius: '20px', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 8px 32px rgba(0,0,0,0.3)', flexGrow: 1 }}>
+                {/* Size Slider */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{ fontSize: '12px', color: 'var(--text-secondary)', width: '40px' }}>Size</span>
+                    <input 
+                        type="range" min="1" max="50" value={brushSize} 
+                        onChange={(e) => setBrushSize(parseInt(e.target.value))}
+                        style={{ flex: 1, accentColor: 'var(--accent)' }}
+                    />
+                    <div style={{ width: '20px', height: '20px', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                        <div style={{ width: Math.min(brushSize, 20), height: Math.min(brushSize, 20), background: color === '#FFFFFF' ? '#ccc' : color, borderRadius: '50%' }}></div>
+                    </div>
+                </div>
+                {/* Opacity Slider */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{ fontSize: '12px', color: 'var(--text-secondary)', width: '40px' }}>Alpha</span>
+                    <input 
+                        type="range" min="0.05" max="1" step="0.05" value={opacity} 
+                        onChange={(e) => setOpacity(parseFloat(e.target.value))}
+                        style={{ flex: 1, accentColor: 'var(--accent)' }}
+                    />
+                    <span style={{ fontSize: '12px', color: 'white', width: '20px', textAlign: 'right' }}>{Math.round(opacity * 100)}%</span>
+                </div>
+                {/* Zoom Slider */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{ fontSize: '12px', color: 'var(--text-secondary)', width: '40px' }}>Zoom</span>
+                    <input 
+                        type="range" min="1" max="3" step="0.1" value={zoom} 
+                        onChange={(e) => setZoom(parseFloat(e.target.value))}
+                        style={{ flex: 1, accentColor: 'var(--accent)' }}
+                    />
+                    <span style={{ fontSize: '12px', color: 'white', width: '20px', textAlign: 'right' }}>{Math.round(zoom * 100)}%</span>
+                </div>
             </div>
 
             {/* Action Dock */}
             <div className="glass-panel" style={{ display: 'flex', gap: '10px', alignItems: 'center', padding: '8px 12px', borderRadius: '30px', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
+                  <button onClick={() => setIsEraser(!isEraser)} style={{ padding: '8px 14px', background: isEraser ? 'rgba(255,255,255,0.2)' : 'transparent', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '6px', color: 'white', fontSize: '0.9rem', cursor: 'pointer', transition: 'background 0.2s' }}>
+                    🧼 Eraser
+                  </button>
                   <button onClick={() => myCanvasRef.current?.undo()} style={{ padding: '8px 14px', background: 'transparent', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '6px', color: 'white', fontSize: '0.9rem', cursor: 'pointer', transition: 'background 0.2s' }} onMouseOver={e => e.currentTarget.style.background='rgba(255,255,255,0.1)'} onMouseOut={e => e.currentTarget.style.background='transparent'}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>
                     Undo
@@ -621,17 +795,20 @@ function App() {
           )}
         </div>
 
-        <div className="reference-container" style={{ width: 400, height: 300, cursor: isEyedropper ? 'crosshair' : 'default', position: 'relative' }} onClick={handleReferenceClick}>
-          <img 
-              ref={referenceImgRef}
-              src={currentImage}
-              alt="Reference" 
-              style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: isImageLoading ? 0 : 1, transition: 'opacity 0.3s' }}
-              crossOrigin="anonymous"
-              onLoad={handleImageLoad}
-              onError={handleImageError}
-          />
-          {showGrid && !isImageLoading && <div className="grid-overlay"></div>}
+        <div className="reference-container" style={{ cursor: isEyedropper ? 'crosshair' : 'default', width: '100%', maxWidth: '400px', display: 'flex', justifyContent: 'center', position: 'relative' }} onClick={handleReferenceClick}>
+          <div ref={refScrollRef} onScroll={handleRefScroll} style={{ width: '100%', maxHeight: '300px', overflow: 'auto', scrollbarWidth: 'thin' }}>
+            <img 
+                ref={referenceImgRef}
+                src={currentImage}
+                alt="Reference" 
+                className="responsive-reference"
+                style={{ opacity: isImageLoading ? 0 : 1, transition: 'opacity 0.3s', width: `${displayZoom * 100}%`, maxWidth: 'none' }}
+                crossOrigin="anonymous"
+                onLoad={handleImageLoad}
+                onError={handleImageError}
+            />
+          </div>
+          {showGrid && !isImageLoading && gameStatus !== 'finished' && <div className="grid-overlay"></div>}
         </div>
 
         <div className="canvas-container">
@@ -662,7 +839,7 @@ function App() {
                </div>
              </>
           )}
-          <div className="canvas-wrapper" style={{ width: 400, height: 300, position: 'relative' }}>
+          <div className="responsive-canvas-wrapper">
              {gameStatus === 'finished' && oppDiffUrl && (
                 <img src={oppDiffUrl} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 20, animation: 'fadeIn 1s ease 0.5s forwards', opacity: 0 }} alt="Error Highlight" />
              )}
@@ -671,7 +848,7 @@ function App() {
                 isPlayer={false} 
                 color="#000" 
                 brushSize={10} 
-                showGrid={showGrid}
+                showGrid={showGrid && gameStatus !== 'finished'}
             />
           </div>
         </div>
