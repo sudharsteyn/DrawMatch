@@ -158,7 +158,7 @@ io.on('connection', (socket) => {
                         io.to(roomId).emit('gameOver', { scores: rooms[roomId].scores });
                         rooms[roomId].gameStarted = false; // Prevent 'opponentLeft' forfeit logic after the game naturally ends
                     }
-                }, 60000);
+                }, 180000);
             }
         }, 1000);
     }
@@ -259,7 +259,7 @@ io.on('connection', (socket) => {
                         io.to(roomId).emit('gameOver', { scores: rooms[roomId].scores });
                         rooms[roomId].gameStarted = false;
                     }
-                }, 60000);
+                }, 180000);
             } else {
                 // Let the first player know they are waiting, and notify the second player
                 socket.emit('waitingForRematch');
