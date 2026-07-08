@@ -243,15 +243,95 @@ body {
   height: 20px;
   background: rgba(0,0,0,0.3);
   border-radius: 10px;
-  overflow: hidden;
   border: 1px solid var(--border-color);
+  position: relative;
+  /* Removed overflow: hidden so glows and sparks can spill out */
+}
+
+@keyframes stripes {
+  0% { background-position: 0 0; }
+  100% { background-position: 30px 0; }
+}
+
+@keyframes spark-fly {
+  0% { transform: scale(1) translate(0, 0); opacity: 1; }
+  100% { transform: scale(0) translate(20px, -20px); opacity: 0; }
 }
 
 .accuracy-bar {
   height: 100%;
-  background: linear-gradient(90deg, var(--danger), var(--success));
   width: 0%;
-  transition: width 0.3s ease;
+  border-radius: 10px;
+  transition: width 0.3s ease, background-color 0.3s ease, box-shadow 0.3s ease;
+  background-image: linear-gradient(
+    -45deg,
+    rgba(255, 255, 255, 0.2) 25%,
+    transparent 25%,
+    transparent 50%,
+    rgba(255, 255, 255, 0.2) 50%,
+    rgba(255, 255, 255, 0.2) 75%,
+    transparent 75%,
+    transparent
+  );
+  background-size: 30px 30px;
+  animation: stripes 1s linear infinite;
+  position: relative;
+}
+
+.accuracy-bar::after {
+  content: '';
+  position: absolute;
+  right: -5px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 10px;
+  height: 10px;
+  background: white;
+  border-radius: 50%;
+  box-shadow: 0 0 10px white, 0 0 20px currentColor;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.accuracy-bar.is-active::after {
+  opacity: 1;
+}
+
+/* Add a continuous sparking element when active */
+.accuracy-bar.is-active::before {
+  content: '';
+  position: absolute;
+  right: -5px;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  background: white;
+  border-radius: 50%;
+  animation: spark-fly 0.5s ease-out infinite;
+}
+
+.acc-low {
+  background-color: #ef4444;
+  box-shadow: 0 0 15px rgba(239, 68, 68, 0.6);
+  color: #ef4444; /* Used for the spark currentColor */
+}
+
+.acc-med {
+  background-color: #eab308;
+  box-shadow: 0 0 15px rgba(234, 179, 8, 0.6);
+  color: #eab308;
+}
+
+.acc-high {
+  background-color: #10b981;
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.6);
+  color: #10b981;
+}
+
+.acc-epic {
+  background-color: #0ea5e9;
+  box-shadow: 0 0 25px rgba(14, 165, 233, 0.8), inset 0 0 10px rgba(255,255,255,0.5);
+  color: #0ea5e9;
 }
 
 .toolbar {

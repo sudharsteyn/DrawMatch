@@ -1601,7 +1601,11 @@ function App() {
               </div>
               <div className='accuracy-bar-container'>
                 <div
-                  className='accuracy-bar'
+                  className={`accuracy-bar ${
+                    (gameStatus === 'finished' ? displayMyScore : myScore) >= 95 ? 'acc-epic' :
+                    (gameStatus === 'finished' ? displayMyScore : myScore) >= 80 ? 'acc-high' :
+                    (gameStatus === 'finished' ? displayMyScore : myScore) >= 50 ? 'acc-med' : 'acc-low'
+                  } ${(gameStatus === 'finished' ? displayMyScore : myScore) > 0 ? 'is-active' : ''}`}
                   style={{
                     width: `${gameStatus === 'finished' ? displayMyScore : myScore}%`,
                   }}
