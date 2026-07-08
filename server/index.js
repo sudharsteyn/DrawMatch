@@ -7,9 +7,19 @@ const path = require('path');
 const app = express();
 app.use(cors());
 
+const imageCache = {};
+
 app.get('/api/proxy-image', async (req, res) => {
     const url = req.query.url;
     if (!url) return res.status(400).send('Missing url');
+    
+    // Serve from cache to ensure player 2 gets the exact same bytes instantly
+    if (imageCache[url]) {
+        res.setHeader('Content-Type', imageCache[url].contentType);
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Cache-Control', 'public, max-age=31536000');
+        return res.send(imageCache[url].buffer);
+    }
     
     // Set a strict 10-second timeout for the AI generation so the frontend doesn't hang forever
     const controller = new AbortController();
@@ -24,7 +34,11 @@ app.get('/api/proxy-image', async (req, res) => {
         const arrayBuffer = await response.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
         
-        res.setHeader('Content-Type', response.headers.get('content-type') || 'image/jpeg');
+        const contentType = response.headers.get('content-type') || 'image/svg+xml';
+        imageCache[url] = { buffer, contentType }; // Cache it for the opponent
+        setTimeout(() => { delete imageCache[url]; }, 5 * 60 * 1000); // Prevent memory leak
+        
+        res.setHeader('Content-Type', contentType);
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Cache-Control', 'public, max-age=31536000');
         res.send(buffer);
@@ -67,8 +81,14 @@ io.on('connection', (socket) => {
         referenceImage: imageSrc || `/reference_${Math.floor(Math.random() * 4) + 1}.png`,
         strokes: [], // Store all strokes for robust syncing
         scores: {},   // Store latest scores
-        endTime: null
+        endTime: null,
+        deleteTimeout: null
       };
+    }
+
+    if (rooms[roomId].deleteTimeout) {
+        clearTimeout(rooms[roomId].deleteTimeout);
+        rooms[roomId].deleteTimeout = null;
     }
 
     if (rooms[roomId].players.length < 2 && !rooms[roomId].players.includes(socket.id)) {
@@ -89,19 +109,25 @@ io.on('connection', (socket) => {
     // Notify room of player update
     io.to(roomId).emit('roomUpdate', { players: rooms[roomId].players });
     
-    // Start game if 2 players are here
+    // Start game if 2 players are here, but wait 1s to let any "refresh ghost" disconnects clear out
     if (rooms[roomId].players.length === 2 && !rooms[roomId].gameStarted) {
-        rooms[roomId].gameStarted = true;
-        const endTime = Date.now() + 180000; // 3 minutes
-        rooms[roomId].endTime = endTime;
-        io.to(roomId).emit('gameStarted', { endTime });
-        
         setTimeout(() => {
-            if (rooms[roomId]) {
-                io.to(roomId).emit('gameOver', { scores: rooms[roomId].scores });
-                rooms[roomId].gameStarted = false; // Prevent 'opponentLeft' forfeit logic after the game naturally ends
+            if (rooms[roomId] && rooms[roomId].players.length === 2 && !rooms[roomId].gameStarted) {
+                rooms[roomId].gameStarted = true;
+                const endTime = Date.now() + 60000; // 60 seconds
+                rooms[roomId].endTime = endTime;
+                io.to(roomId).emit('gameStarted', { endTime });
+                
+                if (rooms[roomId].gameTimeout) clearTimeout(rooms[roomId].gameTimeout);
+                
+                rooms[roomId].gameTimeout = setTimeout(() => {
+                    if (rooms[roomId]) {
+                        io.to(roomId).emit('gameOver', { scores: rooms[roomId].scores });
+                        rooms[roomId].gameStarted = false; // Prevent 'opponentLeft' forfeit logic after the game naturally ends
+                    }
+                }, 60000);
             }
-        }, 180000);
+        }, 1000);
     }
   });
 
@@ -157,6 +183,54 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('playAgain', ({ roomId }) => {
+    if (rooms[roomId]) {
+        // Only allow restart if game is actually over
+        if (!rooms[roomId].gameStarted) {
+            
+            if (!rooms[roomId].rematchReady) rooms[roomId].rematchReady = [];
+            if (!rooms[roomId].rematchReady.includes(socket.id)) {
+                rooms[roomId].rematchReady.push(socket.id);
+            }
+            
+            if (rooms[roomId].rematchReady.length === 2) {
+                // Both players want to play again! Reset and start.
+                rooms[roomId].rematchReady = [];
+                rooms[roomId].strokes = [];
+                rooms[roomId].scores = {};
+                
+                // Generate a new dynamic AI image for the rematch as an SVG for infinite vector resolution
+                const randomSeed = Math.random().toString(36).substring(7);
+                const imageSrc = `https://api.dicebear.com/7.x/shapes/svg?seed=${randomSeed}&backgroundColor=0a0a0a,1a1a1a&shape1Color=ff0000,00ff00,0000ff,ffff00,00ffff,ff00ff&shape2Color=ff0000,00ff00,0000ff,ffff00,00ffff,ff00ff&shape3Color=ff0000,00ff00,0000ff,ffff00,00ffff,ff00ff`;
+                rooms[roomId].referenceImage = `/api/proxy-image?url=${encodeURIComponent(imageSrc)}`;
+                
+                // Start the game!
+                rooms[roomId].gameStarted = true;
+                const endTime = Date.now() + 60000; // 60 seconds
+                rooms[roomId].endTime = endTime;
+                
+                io.to(roomId).emit('restartMatch', { 
+                    referenceImage: rooms[roomId].referenceImage,
+                    endTime
+                });
+                
+                if (rooms[roomId].gameTimeout) clearTimeout(rooms[roomId].gameTimeout);
+                
+                rooms[roomId].gameTimeout = setTimeout(() => {
+                    if (rooms[roomId]) {
+                        io.to(roomId).emit('gameOver', { scores: rooms[roomId].scores });
+                        rooms[roomId].gameStarted = false;
+                    }
+                }, 60000);
+            } else {
+                // Let the first player know they are waiting, and notify the second player
+                socket.emit('waitingForRematch');
+                socket.to(roomId).emit('opponentWantsRematch');
+            }
+        }
+    }
+  });
+
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
     for (const roomId in rooms) {
@@ -166,12 +240,23 @@ io.on('connection', (socket) => {
         room.players.splice(index, 1);
         io.to(roomId).emit('roomUpdate', { players: room.players });
         
+        if (room.rematchReady) {
+            room.rematchReady = room.rematchReady.filter(id => id !== socket.id);
+        }
+
         if (room.players.length === 0) {
-            delete rooms[roomId]; 
+            // Give the creator a 10 second grace period to rejoin if they just refreshed the page
+            room.deleteTimeout = setTimeout(() => {
+                if (rooms[roomId] && rooms[roomId].players.length === 0) {
+                    delete rooms[roomId]; 
+                }
+            }, 10000);
         } else {
-            // If the game was already started, let the remaining player know their opponent left
-            if (room.gameStarted) {
-                io.to(roomId).emit('opponentLeft');
+            // If the game was already started, or they were on the post-game screen, notify the remaining player
+            if (room.gameStarted || room.endTime !== null) {
+                const forfeited = room.gameStarted;
+                room.gameStarted = false; // Prevent new joiners from thinking the game is active
+                io.to(roomId).emit('opponentLeft', { forfeited });
             }
         }
       }
