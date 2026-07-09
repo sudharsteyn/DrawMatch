@@ -418,6 +418,8 @@ function App() {
   const [displayOppScore, setDisplayOppScore] = useState(0);
   const [comboPopups, setComboPopups] = useState([]);
   const [isShaking, setIsShaking] = useState(false);
+  const [bgIntensity, setBgIntensity] = useState('normal');
+  const bgIntensityTimeoutRef = useRef(null);
   const [isMuted, setIsMuted] = useState(false);
   const hasAutoPlayedBgm = useRef(false);
   const [timeLeft, setTimeLeft] = useState(
@@ -919,6 +921,14 @@ function App() {
           score - prev >= 8 ? 'COMBO!' : score - prev >= 5 ? 'GREAT!' : 'NICE!';
         if (text === 'COMBO!') triggerShake();
         const id = Date.now();
+        
+        const newIntensity = (score - prev >= 8) ? 'epic' : 'fast';
+        setBgIntensity(newIntensity);
+        if (bgIntensityTimeoutRef.current) clearTimeout(bgIntensityTimeoutRef.current);
+        bgIntensityTimeoutRef.current = setTimeout(() => {
+          setBgIntensity('normal');
+        }, 2000);
+
         setComboPopups((curr) => [...curr, { id, text }]);
         playCombo();
         setTimeout(() => {
@@ -1186,7 +1196,9 @@ function App() {
   };
 
   return (
-    <div className={`app-container ${isShaking ? 'shake' : ''}`}>
+    <>
+      <div className={`dynamic-bg ${bgIntensity === 'normal' ? '' : `intensity-${bgIntensity}`}`}></div>
+      <div className={`app-container ${isShaking ? 'shake' : ''}`}>
       <div
         className='header'
         style={{
@@ -2055,6 +2067,7 @@ function App() {
         </div>
       </div>
     </div>
+    </>
   );
 }
 
